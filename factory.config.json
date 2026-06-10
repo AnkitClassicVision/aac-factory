@@ -1,29 +1,39 @@
 {
-  "_doc": "AAC Factory user preferences. Edit freely — generators, the improvement loop, and the future S6 compiler read this. Per-node card values always win over these defaults.",
+  "_doc": "AAC Factory user preferences. Edit freely \u2014 generators, the improvement loop, and the future S6 compiler read this. Per-node card values always win over these defaults.",
   "execution_preferences": {
     "judgment_harness": "claude-code-headless",
-    "_judgment_harness_options": ["anthropic-api", "claude-code-headless", "hermes-skill", "local-model"],
+    "_judgment_harness_options": [
+      "anthropic-api",
+      "claude-code-headless",
+      "hermes-skill",
+      "local-model"
+    ],
     "auth_mode": "oauth-cli",
-    "_auth_mode_options": ["oauth-cli (claude -p via your Claude login, no API key)", "api-key (ANTHROPIC_API_KEY or provider key)"],
+    "_auth_mode_options": [
+      "oauth-cli (claude -p via your Claude login, no API key)",
+      "api-key (ANTHROPIC_API_KEY or provider key)"
+    ],
     "deterministic_harness": "python-deterministic"
   },
   "model_preferences": {
     "default_judgment_model": "claude-sonnet-4-6",
-    "ladder": [
-      { "id": "claude-haiku-4-5-20251001", "cost_rank": 1, "tier": "fast", "provider": "anthropic" },
-      { "id": "claude-sonnet-4-6", "cost_rank": 2, "tier": "balanced", "provider": "anthropic" },
-      { "id": "claude-opus-4-8", "cost_rank": 3, "tier": "deep", "provider": "anthropic" }
-    ],
+    "ladder": null,
     "allow_local_models": false,
     "local": {
       "_doc": "Set allow_local_models true and list models to add them to the improvement ladder (cost_rank 0 = cheapest). The improver will trial them like any challenger; adoption still requires the holdout pass.",
       "provider": "ollama",
       "endpoint": "http://localhost:11434",
       "models": []
-    }
+    },
+    "_ladder_doc": "null = no preference: the factory uses .factory-scan.json (run: python3 scripts/scan_models.py --write-config) or built-in Anthropic defaults. Set a list here to pin your own ladder; supported providers: anthropic, openai, gemini, mistral, deepseek, ollama (local)."
   },
   "deploy_preferences": {
     "runtime_target": "vps-scheduler",
-    "_runtime_target_options": ["vps-scheduler", "lambda", "hermes-cron", "local-cron"]
+    "_runtime_target_options": [
+      "vps-scheduler",
+      "lambda",
+      "hermes-cron",
+      "local-cron"
+    ]
   }
 }

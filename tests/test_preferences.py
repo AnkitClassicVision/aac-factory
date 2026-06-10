@@ -58,5 +58,37 @@ def test_preferences_flow() -> None:
     print("[OK] preferences flow test passed")
 
 
+
+
+def test_model_scan() -> None:
+    """Offline scan: env-key detection + catalog filtering + config seeding precedence."""
+    import subprocess
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td) / "repo"
+        (work / "scripts").mkdir(parents=True)
+        for f in ("scan_models.py", "model_catalog.json", "factory_config.py"):
+            (work / "scripts" / f).write_text((REPO / "scripts" / f).read_text(encoding="utf-8"), encoding="utf-8")
+        env = {k: v for k, v in __import__("os").environ.items()
+               if k not in {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+                            "MISTRAL_API_KEY", "DEEPSEEK_API_KEY"}}
+        env.update({"DEEPSEEK_API_KEY": "test-key", "PATH": "/usr/bin:/bin"})  # no claude CLI, no other keys
+        r = subprocess.run([sys.executable, "scripts/scan_models.py", "--write-config"],
+                           cwd=work, capture_output=True, text=True, env=env)
+        assert r.returncode == 0, r.stdout + r.stderr
+        scan = json.loads((work / ".factory-scan.json").read_text(encoding="utf-8"))
+        assert scan["providers"]["deepseek"]["available"] is True
+        assert scan["providers"]["openai"]["available"] is False
+        ids = [m["id"] for m in scan["ladder"]]
+        assert "deepseek-chat" in ids and not any(i.startswith("gpt-") for i in ids)
+        cfg = json.loads((work / "factory.config.json").read_text(encoding="utf-8"))
+        assert cfg["model_preferences"]["ladder"] == scan["ladder"], "scan must seed empty config"
+        # second write must NOT clobber the now-set ladder
+        r2 = subprocess.run([sys.executable, "scripts/scan_models.py", "--write-config"],
+                            cwd=work, capture_output=True, text=True, env=env)
+        assert "left untouched" in r2.stdout
+    print("[OK] model scan test passed")
+
+
 if __name__ == "__main__":
     test_preferences_flow()
+    test_model_scan()

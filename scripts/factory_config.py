@@ -53,10 +53,22 @@ def load_config() -> dict:
 
 
 def model_ladder(cfg: dict | None = None) -> list[dict]:
-    """The improvement loop's challenger set. Local models join (cost_rank 0) only when allowed."""
+    """The improvement loop's challenger set.
+    Precedence: user ladder (factory.config.json) > machine scan (.factory-scan.json,
+    written by scan_models.py when the user has no preferences) > built-in defaults.
+    Local models join (cost_rank 0) only when allowed/installed."""
     cfg = cfg or load_config()
     mp = cfg.get("model_preferences", {})
-    ladder = list(mp.get("ladder") or DEFAULTS["model_preferences"]["ladder"])
+    ladder = list(mp.get("ladder") or [])
+    if not ladder:
+        scan_path = ROOT / ".factory-scan.json"
+        if scan_path.exists():
+            try:
+                ladder = list(json.loads(scan_path.read_text(encoding="utf-8")).get("ladder") or [])
+            except Exception:
+                ladder = []
+    if not ladder:
+        ladder = list(DEFAULTS["model_preferences"]["ladder"])
     if mp.get("allow_local_models") and (mp.get("local") or {}).get("models"):
         local = mp["local"]
         for m in local["models"]:

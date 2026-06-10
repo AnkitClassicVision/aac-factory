@@ -39,10 +39,12 @@ objective-function improvement loops.
 ## User preferences
 
 `factory.config.json` (repo root) sets: judgment harness (anthropic-api / claude-code-headless /
-hermes-skill / local-model), auth mode (oauth-cli vs api-key), the model ladder the improvement
-loop trials (local models join when `allow_local_models` is true), default judgment model, and
-the deploy `runtime_target`. Per-node card values always override preferences. Editing the config
-never silently mutates existing cards.
+hermes-skill / local-model), auth mode (oauth-cli vs api-key), the model ladder, default judgment
+model, and the deploy `runtime_target`. **If the user has no model preferences (ladder null/absent),
+run `python3 scripts/scan_models.py --write-config` FIRST** — it detects available providers
+(Anthropic/OpenAI/Gemini/Mistral/DeepSeek keys, the claude CLI for OAuth, local Ollama models) and
+seeds the ladder from `scripts/model_catalog.json`. Never overwrite a ladder the user already set.
+Per-node card values always override preferences; config edits never silently mutate existing cards.
 
 ## Models are testable and swappable per node
 

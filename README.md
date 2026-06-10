@@ -44,9 +44,12 @@ in `tests/` build a complete synthetic package end to end — read them as execu
 
 Edit `factory.config.json` at the repo root: pick the judgment harness (`anthropic-api`,
 `claude-code-headless` for OAuth-CLI with no API key, `hermes-skill`, or `local-model`), the auth
-mode, the model ladder the improvement loop trials, an optional default judgment model, local
-models via Ollama (`allow_local_models: true` adds them as cost-rank-0 challengers), and the
-deploy `runtime_target`. Per-node card values always override preferences, and editing the config
+mode, your model ladder, an optional default judgment model, and the deploy `runtime_target`.
+**No preferences yet? Run `python3 scripts/scan_models.py --write-config`** — it detects which
+providers you actually have (Anthropic, OpenAI, Gemini, Mistral, DeepSeek via API keys; Anthropic
+via the `claude` CLI with no key; Ollama local models via a 2s ping) and builds your ladder from
+the multi-provider catalog (`scripts/model_catalog.json`, landscape snapshot 2026-06). Installed
+Ollama models join as cost-rank-0 (free) challengers. Per-node card values always override preferences, and editing the config
 never silently mutates existing cards. Models stay testable and swappable per node forever:
 `improve_node.py` trials the ladder and adopts only on better-or-equal-and-cheaper with a sealed
 holdout pass.
@@ -80,7 +83,7 @@ cost-minimize, improvement policy). Every workflow card carries the `automation_
 ## The improvement loop (Karpathy-style)
 
 Each judgment node is an optimizable unit with an objective function. `improve_node.py`
-evaluates the champion config, trials cheaper models from `scripts/models.json`, calibrates
+evaluates the champion config, trials cheaper challengers from your ladder (factory.config.json, the machine scan, or built-ins), calibrates
 confidence floors from live run cards when they exist, and adopts a challenger only when it is
 better, or equal and cheaper, AND passes the sealed holdout split. Adoption updates the card,
 writes `exports/improvement_ledger.jsonl`, and re-enters QA like any human change. The improver

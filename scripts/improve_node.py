@@ -8,7 +8,7 @@ Loop per invocation:
      The improver develops on the OPEN split only; the sealed holdout is touched once, at the
      adoption gate. Selection code paths physically cannot read the holdout file.
   2. Champion = the node card's current (model, prompt_version). Evaluate on OPEN.
-  3. Challengers = cheaper models from scripts/models.json (his rule: always try the less
+  3. Challengers = cheaper models from the ladder (config > machine scan > built-ins; always try the less
      expensive model), plus prompt-variant and threshold-calibration hooks (live data from
      run cards feeds threshold calibration when present).
   4. Rank by (golden_accuracy desc, cost_rank asc). Candidate wins if better, or equal-and-cheaper.
