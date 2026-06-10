@@ -10,3 +10,6 @@ concepts/*
 __pycache__/
 *.pyc
 .DS_Store
+
+# Machine-local model scan (re-generated per machine)
+.factory-scan.json

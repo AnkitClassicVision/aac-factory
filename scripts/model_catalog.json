@@ -1,0 +1,34 @@
+{
+  "_doc": "Multi-provider model catalog for the improvement ladder. cost_rank is a RELATIVE cross-provider ordering (0 = local/free, higher = pricier per blended Mtok). Snapshot of the public landscape 2026-06; ids marked check_provider_docs should be confirmed against provider docs before live use — the improvement loop's holdout gate protects against bad swaps either way.",
+  "scanned": "2026-06-10",
+  "providers": {
+    "anthropic": { "env_key": "ANTHROPIC_API_KEY", "oauth_cli": "claude" },
+    "openai": { "env_key": "OPENAI_API_KEY" },
+    "gemini": { "env_key": ["GEMINI_API_KEY", "GOOGLE_API_KEY"] },
+    "mistral": { "env_key": "MISTRAL_API_KEY" },
+    "deepseek": { "env_key": "DEEPSEEK_API_KEY" },
+    "ollama": { "endpoint": "http://localhost:11434" }
+  },
+  "catalog": [
+    { "id": "deepseek-chat", "provider": "deepseek", "cost_rank": 1, "tier": "fast", "notes": "V3.2, ~$0.14/$0.28 per Mtok", "id_confidence": "check_provider_docs" },
+    { "id": "gemini-3.1-flash-lite", "provider": "gemini", "cost_rank": 1, "tier": "fast", "notes": "~$0.10/$0.40 per Mtok", "id_confidence": "check_provider_docs" },
+    { "id": "gemini-2.5-flash", "provider": "gemini", "cost_rank": 2, "tier": "fast", "notes": "~$0.15/$0.60 per Mtok", "id_confidence": "verified_pricing" },
+    { "id": "mistral-small-4", "provider": "mistral", "cost_rank": 2, "tier": "fast", "notes": "unified small model, Mar 2026", "id_confidence": "check_provider_docs" },
+    { "id": "claude-haiku-4-5-20251001", "provider": "anthropic", "cost_rank": 3, "tier": "fast", "id_confidence": "verified" },
+    { "id": "gemini-3-flash", "provider": "gemini", "cost_rank": 3, "tier": "balanced", "notes": "~$0.50/$3.00 per Mtok", "id_confidence": "check_provider_docs" },
+    { "id": "deepseek-reasoner", "provider": "deepseek", "cost_rank": 3, "tier": "reasoning", "notes": "R1 family", "id_confidence": "check_provider_docs" },
+    { "id": "mistral-medium-3.5", "provider": "mistral", "cost_rank": 4, "tier": "balanced", "id_confidence": "check_provider_docs" },
+    { "id": "gpt-5.4", "provider": "openai", "cost_rank": 5, "tier": "balanced", "notes": "~$2.50/$15 per Mtok", "id_confidence": "check_provider_docs" },
+    { "id": "claude-sonnet-4-6", "provider": "anthropic", "cost_rank": 5, "tier": "balanced", "id_confidence": "verified" },
+    { "id": "gemini-3.1-pro", "provider": "gemini", "cost_rank": 6, "tier": "deep", "id_confidence": "check_provider_docs" },
+    { "id": "mistral-large-3", "provider": "mistral", "cost_rank": 6, "tier": "deep", "notes": "open-weight MoE 675B/41B", "id_confidence": "check_provider_docs" },
+    { "id": "gpt-5.5", "provider": "openai", "cost_rank": 7, "tier": "deep", "id_confidence": "check_provider_docs" },
+    { "id": "claude-opus-4-8", "provider": "anthropic", "cost_rank": 7, "tier": "deep", "id_confidence": "verified" },
+    { "id": "ollama/qwen3:30b", "provider": "ollama", "cost_rank": 0, "tier": "local", "notes": "best local all-rounder per 2026 rankings" },
+    { "id": "ollama/qwen3-coder:30b", "provider": "ollama", "cost_rank": 0, "tier": "local-coding" },
+    { "id": "ollama/llama3.3:70b", "provider": "ollama", "cost_rank": 0, "tier": "local-quality", "notes": "needs ~40GB VRAM" },
+    { "id": "ollama/gpt-oss:20b", "provider": "ollama", "cost_rank": 0, "tier": "local-reasoning" },
+    { "id": "ollama/gemma4:26b", "provider": "ollama", "cost_rank": 0, "tier": "local-multimodal" },
+    { "id": "ollama/deepseek-r1", "provider": "ollama", "cost_rank": 0, "tier": "local-reasoning" }
+  ]
+}

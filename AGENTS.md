@@ -12,7 +12,7 @@ the full operating instructions; the short version:
    unknown fields with plausible content (TODO + provenance `assumed`); never read `.holdout/`
    from selection code; never overwrite human-edited cards or graded goldens; never take external
    actions — the Factory designs and certifies only.
-3. User preferences live in `factory.config.json` (harness: anthropic-api / claude-code-headless /
+3. User preferences live in `factory.config.json`; if the user has no model ladder set, run `python3 scripts/scan_models.py --write-config` first (multi-provider detection: Anthropic/OpenAI/Gemini/Mistral/DeepSeek/Ollama) (harness: anthropic-api / claude-code-headless /
    hermes-skill / local-model; auth: oauth-cli vs api-key; model ladder incl. optional local
    models; deploy runtime_target). Per-node card values override preferences.
 4. Models are swappable per node via `scripts/improve_node.py`: challengers from the ladder,
