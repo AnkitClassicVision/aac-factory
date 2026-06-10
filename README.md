@@ -118,7 +118,7 @@ refusals with reasons, `external_actions_taken`, escalations auto-queued to
 
 ## Versioning
 
-**aac-factory v0.1.1** implements the AAC 2.5 pipeline proposal
+**aac-factory v0.2.0** implements the AAC 2.5 pipeline proposal
 ([agent-automation-creator](https://github.com/AnkitClassicVision/agent-automation-creator),
 branch `feat/aac-2.5-proposal`). The factory is fast-moving code with its own semver; the AAC
 framework versions slowly, on evidence. **AAC 3.0 is reserved** until this factory has shipped
@@ -135,8 +135,22 @@ tests/              regression suite (pipeline, suggester, run cards, improvemen
 docs/               pipeline spec + autonomy/QA/self-heal spec
 ```
 
+## Compile and run (S6)
+
+`python3 scripts/compile_agent.py concepts/<slug>` turns certified cards into a runnable agent
+under `concepts/<slug>/build/`: an orchestrator that walks the graph enforcing confidence floors,
+hard-refuse + leak scans, and bounded routing; per-node LLM adapters (Anthropic API, `claude -p`
+OAuth, OpenAI-compatible for OpenAI/DeepSeek/Mistral/Gemini, local Ollama); D-node handler stubs
+(yours to implement, never overwritten); a run card per node execution; an async human review
+queue; and deploy snippets (cron / systemd timer) per your `runtime_target`.
+
+Honesty is compiled in: packages with TODO fields or ungraded goldens build in **shadow lane**
+(internal artifacts only) no matter what the card requests, and the emitted runtime contains
+**zero external effectors by construction** — send/write code is absent, not disabled. Smoke any
+build offline: `FACTORY_FAKE_LLM=1 python3 build/agent/main.py '{}'`. Kill switch: `touch build/KILL`.
+
 ## Roadmap
 
-1. S6 compiler: cards → runnable agent (live executors light up real evals + run cards)
-2. Blind LLM QA pass on cadence (weekly cron per package)
-3. Improver on live run-card streams (drift-triggered, not just scheduled)
+1. Blind LLM QA pass on cadence (weekly cron per package)
+2. Improver on live run-card streams (drift-triggered, not just scheduled)
+3. Compiled-executor evals (evaluate_node runs the real build instead of replay stubs)

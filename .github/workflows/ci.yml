@@ -14,4 +14,4 @@ jobs:
           python-version: "3.12"
       - name: Run regression suite
         working-directory: tests
-        run: python test_agent_pipeline.py && python test_improvement_loop.py && python test_preferences.py
+        run: python test_agent_pipeline.py && python test_improvement_loop.py && python test_preferences.py && python test_compiler.py

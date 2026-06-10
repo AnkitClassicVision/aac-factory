@@ -21,6 +21,10 @@ objective-function improvement loops.
    loops → combined export → print the human queue).
 3. Read `exports/readiness_report.json` and `exports/qa_report.json`. Report the ladder honestly:
    R0 structure, R1 completeness, R2 graded goldens, R3/R4 always human.
+4. **Compile (S6)**: `python3 scripts/compile_agent.py concepts/<slug>` -> `build/` runnable agent.
+   The compiler refuses on R0 fails, TODO models, or missing prompts; R1/R2-blocked packages
+   compile in shadow lane only. Smoke offline with `FACTORY_FAKE_LLM=1 python3 build/agent/main.py '{}'`.
+   D-node handlers are stubs the builder implements; the runtime has zero external effectors.
 
 ## Hard rules (non-negotiable)
 
