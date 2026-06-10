@@ -1,0 +1,45 @@
+{
+  "atlas_id": "atlas_{{SLUG}}",
+  "subject": "{{TOPIC_NAME}}",
+  "spine": "TODO: one falsifiable claim — who it is for + what it does + what counts as the win",
+  "status": "open",
+  "spine_path": [],
+  "root_anchors": [],
+  "clusters": [
+    {
+      "name": "TODO cluster name",
+      "purpose": "TODO why this grouping exists",
+      "trunk_node": "N001",
+      "members": []
+    }
+  ],
+  "nodes": [
+    {
+      "id": "N001",
+      "name": "TODO concept name",
+      "grouping": "TODO cluster name",
+      "confidence": "Hunch",
+      "provenance": "user",
+      "status": "open",
+      "proof_slot": "",
+      "short_def": "",
+      "why_important": "",
+      "eli5": ""
+    }
+  ],
+  "edges": [],
+  "validation_backlog": [],
+  "shaky_tension_flags": [],
+  "process_map": {},
+  "retrieval_sonar": {
+    "aliases": [],
+    "project_terms": [],
+    "owner": "",
+    "last_updated": ""
+  },
+  "interview": {
+    "packet_ref": "process/source_packet.aac.json",
+    "calibration_ref": "",
+    "aac_version": "AAC 2.5 (proposal; canonical = agent-automation-creator repo main)"
+  }
+}

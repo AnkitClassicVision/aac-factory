@@ -1,0 +1,3 @@
+# Dark-factory information barrier: holdout criteria and full QA results stay out of builder view.
+.holdout/
+__pycache__/

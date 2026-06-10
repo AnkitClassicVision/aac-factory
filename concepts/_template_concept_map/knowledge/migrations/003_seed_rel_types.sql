@@ -1,0 +1,16 @@
+INSERT OR IGNORE INTO rel_type (id, name, description) VALUES
+('rel_precedes',     'precedes',      'Logical trunk / sense-making flow'),
+('rel_part_of',      'part_of',       'Structural grouping (tree/fractal)'),
+('rel_is_a',         'is_a',          'Category/type relationship'),
+('rel_depends_on',   'depends_on',    'Conceptual dependency'),
+('rel_requires',     'requires',      'A requires B to be possible'),
+('rel_enables',      'enables',       'A enables B to happen'),
+('rel_causes',       'causes',        'A causes B'),
+('rel_inhibits',     'inhibits',      'A inhibits B'),
+('rel_reduces',      'reduces',       'A reduces B'),
+('rel_increases',    'increases',     'A increases B'),
+('rel_measured_by',  'measured_by',   'A is measured by B'),
+('rel_prevents',     'prevents',      'A prevents B'),
+('rel_triggers',     'triggers',      'A triggers B'),
+('rel_example_of',   'is_example_of', 'A is an example of B'),
+('rel_related',      'related',       'Loose cross-link (use sparingly)');

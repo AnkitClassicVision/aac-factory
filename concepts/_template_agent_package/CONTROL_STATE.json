@@ -1,0 +1,47 @@
+{
+  "topic": { "name": "{{TOPIC_NAME}}", "slug": "{{SLUG}}" },
+  "package_kind": "aac_agent_package",
+  "aac": {
+    "pipeline": "AAC 2.5 (S4a atlas / S4b concept / S4c process cards)",
+    "canonical_source": "agent-automation-creator repo (AAC governance framework)"
+  },
+  "atlas": {
+    "path": "atlas/atlas.json",
+    "status": "TODO",
+    "spine_locked": false
+  },
+  "concept_map": {
+    "path": "{{SLUG}}_concept_map",
+    "export": "{{SLUG}}_concept_map/knowledge/exports/latest.rivermap.json",
+    "status": "TODO"
+  },
+  "process": {
+    "workflow_card": "process/workflow.aac.json",
+    "nodes_dir": "process/nodes",
+    "golden_set": "process/evals/{{SLUG}}.golden.json",
+    "status": "TODO"
+  },
+  "crosswalk": {
+    "path": "atlas/crosswalk.json",
+    "status": "TODO"
+  },
+  "readiness": {
+    "report": "exports/readiness_report.json",
+    "ring": "R0",
+    "lane": "design_scaffold",
+    "status": "TODO"
+  },
+  "qa": {
+    "report": "exports/qa_report.json",
+    "verdict": "TODO",
+    "style": "dark-factory holdout (deterministic auditor + blind LLM pass)",
+    "holdout": ".holdout/ (gitignored — builder never reads criteria)"
+  },
+  "healing": {
+    "proposals": "exports/repair_proposals.json",
+    "policy": "auto-fix derivable classes only; meaning, runtimes, grades, leaks go to the human queue",
+    "open_proposals": 0
+  },
+  "alignment": { "status": "TODO", "notes": [] },
+  "flags": []
+}

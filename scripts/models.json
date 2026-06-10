@@ -1,0 +1,8 @@
+{
+  "note": "Model ladder for the improvement loop. cost_rank is RELATIVE (1 = cheapest). Edit freely; the improver prefers the cheapest model that holds the objective.",
+  "ladder": [
+    { "id": "claude-haiku-4-5-20251001", "cost_rank": 1, "tier": "fast" },
+    { "id": "claude-sonnet-4-6", "cost_rank": 2, "tier": "balanced" },
+    { "id": "claude-opus-4-8", "cost_rank": 3, "tier": "deep" }
+  ]
+}

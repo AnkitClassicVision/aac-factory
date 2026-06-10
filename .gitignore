@@ -1,0 +1,12 @@
+# AAC Factory — public toolchain, private workflows.
+# Everything under concepts/ is YOUR work product and never ships, except the templates.
+concepts/*
+!concepts/_template_agent_package/
+!concepts/_template_concept_map/
+
+# Dark-factory information barrier: holdout criteria/results never ship.
+.holdout/
+
+__pycache__/
+*.pyc
+.DS_Store
