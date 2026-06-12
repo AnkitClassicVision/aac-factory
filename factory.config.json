@@ -20,8 +20,8 @@
     "ladder": null,
     "allow_local_models": false,
     "local": {
-      "_doc": "Set allow_local_models true and list models to add them to the improvement ladder (cost_rank 0 = cheapest). The improver will trial them like any challenger; adoption still requires the holdout pass.",
-      "provider": "ollama",
+      "_doc": "Set allow_local_models true and list models to add them to the improvement ladder (cost_rank 0 = cheapest). provider can be ollama-native (endpoint like http://localhost:11434) or openai-compatible-local (endpoint like http://localhost:8000/v1 for mlx-lm, LM Studio, or vLLM). The improver will trial them like any challenger; adoption still requires real executor evidence plus the holdout pass.",
+      "provider": "ollama-native",
       "endpoint": "http://localhost:11434",
       "models": []
     },

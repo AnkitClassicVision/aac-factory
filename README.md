@@ -49,10 +49,9 @@ mode, your model ladder, an optional default judgment model, and the deploy `run
 providers you actually have (Anthropic, OpenAI, Gemini, Mistral, DeepSeek via API keys; Anthropic
 via the `claude` CLI with no key; Ollama local models via a 2s ping) and builds your ladder from
 the multi-provider catalog (`scripts/model_catalog.json`, landscape snapshot 2026-06). Installed
-Ollama models join as cost-rank-0 (free) challengers. Per-node card values always override preferences, and editing the config
+Ollama-native and OpenAI-compatible local models (mlx-lm / LM Studio / vLLM) can join as cost-rank-0 challengers when `model_preferences.local` is configured. Per-node card values always override preferences, and editing the config
 never silently mutates existing cards. Models stay testable and swappable per node forever:
-`improve_node.py` trials the ladder and adopts only on better-or-equal-and-cheaper with a sealed
-holdout pass.
+`improve_node.py` trials the ladder, but auto-adopts only when the evidence came from a real executor with verified model identity, real-enough usage for cost claims, and a sealed holdout pass. Replay/stub evals queue proposals only.
 
 ## Sharing this repo / getting started cold
 
@@ -90,9 +89,9 @@ writes `exports/improvement_ledger.jsonl`, and re-enters QA like any human chang
 develops on the open split only; selection code cannot read the holdout.
 
 "Fine-tune" today means prompt/threshold/model optimization. Weight-level fine-tuning plugs in
-when a provider path exists. Until the S6 compiler ships live executors, evals run on stub
-(replay) executors: the loop mechanics are test-proven; live model quality measurement arrives
-with the compiler.
+when a provider path exists. Replay/stub evals remain useful for proving loop mechanics, but v0.3
+forbids auto-adoption from stub evidence. Model swaps require real executor evidence before the card
+mutates.
 
 ## QA: dark-factory holdout
 
@@ -112,37 +111,38 @@ in `exports/repair_proposals.json`.
 ## Telemetry is a contract
 
 Every node card requires run-card telemetry (QA blocks otherwise). Executing agents emit per-run
-cards via `scripts/runcard.py`: gate outcomes, confidence, model + prompt versions, cost,
+cards via `scripts/runcard.py`: gate outcomes, confidence, requested model, actual model when
+verified by the adapter, prompt version, honest usage (`unknown` when unavailable, never fake zero),
 refusals with reasons, `external_actions_taken`, escalations auto-queued to
 `process/run-cards/_review_queue/`. Run cards are the promotion evidence and the improver's food.
 
 ## Versioning
 
-**aac-factory v0.2.0** implements the AAC 2.5 pipeline proposal
-([agent-automation-creator](https://github.com/AnkitClassicVision/agent-automation-creator),
-branch `feat/aac-2.5-proposal`). The factory is fast-moving code with its own semver; the AAC
-framework versions slowly, on evidence. **AAC 3.0 is reserved** until this factory has shipped
+**aac-factory v0.3.0** is the Runtime Truth + Integration Reality release. It tightens the S6 compiler/runtime so certification-relevant claims are either physically enforced, honestly marked non-certifying, or blocked before compile/promotion. Highlights: parseable route/gate grammar, executable output gates like `required_if(decision == "include", section)`, requested-vs-actual model telemetry, unknown-not-zero usage, stub-improver auto-adoption blocked, local OpenAI-compatible endpoints, Hermes cron wrapper generation, and finite batch parent/child run cards. See `docs/v0.3-runtime-truth.md` for the release contract.
+
+The factory is fast-moving code with its own semver; the AAC framework versions slowly, on evidence. **AAC 3.0 is reserved** until this factory has shipped
 2-3 real agents end to end (golden sets graded, blind QA cadence running, S6 compiler live).
 
 ## Layout
 
 ```
-scripts/            the 11-stage toolchain + models.json ladder
+scripts/            the toolchain + model catalog + runtime-truth compiler
 concepts/_template_agent_package/   three-layer package template
 concepts/_template_concept_map/     river-map template (SQLite + lint + exports)
-concepts/triage-example/            working example built by this pipeline
-tests/              regression suite (pipeline, suggester, run cards, improvement loop)
+tests/              regression suite (pipeline, preferences, compiler, runtime truth)
 docs/               pipeline spec + autonomy/QA/self-heal spec
 ```
 
 ## Compile and run (S6)
 
 `python3 scripts/compile_agent.py concepts/<slug>` turns certified cards into a runnable agent
-under `concepts/<slug>/build/`: an orchestrator that walks the graph enforcing confidence floors,
-hard-refuse + leak scans, and bounded routing; per-node LLM adapters (Anthropic API, `claude -p`
-OAuth, OpenAI-compatible for OpenAI/DeepSeek/Mistral/Gemini, local Ollama); D-node handler stubs
-(yours to implement, never overwritten); a run card per node execution; an async human review
-queue; and deploy snippets (cron / systemd timer) per your `runtime_target`.
+under `concepts/<slug>/build/`: an orchestrator that walks the graph enforcing parseable route
+conditions, confidence floors, hard-refuse + leak scans, bounded routing, and executable output
+gates; per-node LLM adapters (Anthropic API, `claude -p --model` OAuth, OpenAI-compatible for
+OpenAI/DeepSeek/Mistral/Gemini, local Ollama-native, local OpenAI-compatible for mlx-lm / LM Studio /
+vLLM); D-node handler stubs (yours to implement, never overwritten); a run card per node execution;
+an async human review queue; and deploy snippets (cron / systemd timer / Hermes cron wrapper) per your
+`runtime_target`.
 
 Honesty is compiled in: packages with TODO fields or ungraded goldens build in **shadow lane**
 (internal artifacts only) no matter what the card requests, and the emitted runtime contains

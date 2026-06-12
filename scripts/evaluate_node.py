@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 EXECUTORS = ("replay_proposed", "replay_truth")
+STUB_EXECUTORS = {"replay_proposed", "replay_truth"}
 
 
 def load(p: Path, default=None):
@@ -115,9 +116,16 @@ def main() -> None:
     model = opt("--model", str(card.get("model", "")))
 
     examples = split_examples(pkg, card, split)
+    executor_kind = "stub" if executor in STUB_EXECUTORS else "real"
     result = {
         "node_id": node_id, "split": split, "executor": executor,
-        "executor_note": "stub executor: measures harness correctness, NOT live model quality",
+        "executor_kind": executor_kind,
+        "executor_note": ("stub executor: measures harness correctness, NOT live model quality"
+                          if executor_kind == "stub" else "real executor: model-differentiating evidence"),
+        "model_differentiating_evidence": executor_kind == "real",
+        "certification_eligible": executor_kind == "real",
+        "certification_blockers": ([] if executor_kind == "real"
+                                   else ["stub_executor_no_model_differentiating_evidence"]),
         "model": model, "model_cost_rank": cost_rank_of(model),
         "prompt_version": card.get("prompt_version"),
         **score(examples, executor),

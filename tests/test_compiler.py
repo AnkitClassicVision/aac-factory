@@ -23,6 +23,19 @@ sys.path.insert(0, str(REPO / "tests"))
 from test_improvement_loop import build_pkg  # noqa: E402
 
 
+def make_workflow_conditions_parseable(pkg: Path) -> None:
+    wf_path = pkg / "process" / "workflow.aac.json"
+    wf = json.loads(wf_path.read_text(encoding="utf-8"))
+    replacements = {
+        "low confidence": "confidence < 0.6",
+        "approved": "decision == \"queued_for_human\"",
+        "violation": "decision == \"hard_refuse\"",
+    }
+    for edge in wf.get("edges", []):
+        edge["condition"] = replacements.get(edge.get("condition"), edge.get("condition", "always"))
+    wf_path.write_text(json.dumps(wf, indent=2), encoding="utf-8")
+
+
 def run(cmd, cwd, env=None) -> subprocess.CompletedProcess:
     e = dict(os.environ)
     e.update(env or {})
@@ -49,8 +62,15 @@ def test_compiler() -> None:
         r = run([PY, "scripts/compile_agent.py", str(pkg)], work)
         assert r.returncode != 0 and "no model" in r.stdout + r.stderr, "must refuse TODO model"
 
-        # Adopt a model via the improver (the sanctioned path), then compile
-        run([PY, "scripts/improve_node.py", str(pkg), "t-judge"], work)
+        # Set a concrete model, then prove prose routing conditions fail compile.
+        judge["model"] = "claude-sonnet-4-6"
+        judge_path.write_text(json.dumps(judge, indent=2), encoding="utf-8")
+        r = run([PY, "scripts/compile_agent.py", str(pkg)], work)
+        assert r.returncode != 0 and "non-machine-evaluable condition" in r.stdout + r.stderr, \
+            "prose edge conditions must fail compile"
+
+        # Fix the routing grammar, then compile.
+        make_workflow_conditions_parseable(pkg)
         r = run([PY, "scripts/compile_agent.py", str(pkg)], work)
         assert r.returncode == 0, r.stdout + r.stderr
         assert "COMPILED" in r.stdout

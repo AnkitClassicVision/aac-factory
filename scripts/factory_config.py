@@ -28,7 +28,8 @@ DEFAULTS: dict = {
             {"id": "claude-opus-4-8", "cost_rank": 3, "tier": "deep", "provider": "anthropic"},
         ],
         "allow_local_models": False,
-        "local": {"provider": "ollama", "endpoint": "http://localhost:11434", "models": []},
+        "local": {"provider": "ollama-native", "endpoint": "http://localhost:11434", "models": [],
+                  "_provider_options": ["ollama-native", "openai-compatible-local"]},
     },
     "deploy_preferences": {"runtime_target": None},
 }
@@ -71,9 +72,11 @@ def model_ladder(cfg: dict | None = None) -> list[dict]:
         ladder = list(DEFAULTS["model_preferences"]["ladder"])
     if mp.get("allow_local_models") and (mp.get("local") or {}).get("models"):
         local = mp["local"]
+        provider = local.get("provider", "local")
+        prefix = "ollama" if provider in {"ollama", "ollama-native"} else "local-openai-compatible"
         for m in local["models"]:
-            ladder.append({"id": f"{local.get('provider', 'local')}/{m}", "cost_rank": 0,
-                           "tier": "local", "provider": local.get("provider", "local"),
+            ladder.append({"id": f"{prefix}/{m}", "cost_rank": 0,
+                           "tier": "local", "provider": provider,
                            "endpoint": local.get("endpoint")})
     return ladder
 

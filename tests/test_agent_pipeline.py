@@ -225,8 +225,11 @@ def test_run_card_contract() -> None:
                                   input_ref="in", output_ref="out", source_refs=["s1"])
         errs = runcard.validate_run_card(rc)
         assert any("confidence" in e for e in errs), "C run card must demand confidence/model/prompt"
-        rc.update({"confidence": 0.91, "model": "m", "prompt_version": "1.0.0"})
+        rc.update({"confidence": 0.91, "requested_model": "m", "actual_model": "m",
+                   "model_verified": True, "verification_source": "test",
+                   "executor": "test", "adapter_version": "test", "prompt_version": "1.0.0"})
         assert runcard.validate_run_card(rc) == []
+        assert rc["usage"]["tokens_in"] == "unknown" and rc["cost"]["tokens_in"] == "unknown"
         runcard.write_run_card(pkg, rc)
         assert (pkg / "process" / "run-cards" / "t-judge" / "r1.json").exists()
         rc2 = dict(rc, run_id="r2", refuse={"refused": True, "hard": True, "reason": "identity unclear"})

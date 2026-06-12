@@ -128,15 +128,22 @@ def main() -> None:
     decision = {"node_id": node_id, "champion": {"model": champion_model or "unset",
                 "cost_rank": champion_rank, "open": champion},
                 "candidates": candidates, "threshold_calibration": threshold,
-                "executor_note": "stub executors until S6 compiler: mechanics proven, model quality not yet measured"}
+                "executor_note": "stub/replay executors prove loop mechanics only; auto-adoption requires real executor evidence"}
 
     if winner:
         hold_champ = run_eval(pkg, node_id, "holdout", champion_model or "unset")
         hold_win = run_eval(pkg, node_id, "holdout", winner["model"])
         holdout_pass = (hold_win.get("golden_accuracy") or 0) >= (hold_champ.get("golden_accuracy") or 0)
-        decision["winner"] = {**winner, "holdout": hold_win, "holdout_pass": holdout_pass}
+        real_evidence = bool(
+            champion.get("model_differentiating_evidence")
+            and winner["open"].get("model_differentiating_evidence")
+            and hold_champ.get("model_differentiating_evidence")
+            and hold_win.get("model_differentiating_evidence")
+        )
+        decision["winner"] = {**winner, "holdout": hold_win, "holdout_pass": holdout_pass,
+                              "model_differentiating_evidence": real_evidence}
         auto_rule = policy.get("auto_adopt", "never")
-        may_adopt = (not propose_only and holdout_pass
+        may_adopt = (not propose_only and real_evidence and holdout_pass
                      and auto_rule == "cheaper_or_better_with_holdout_pass"
                      and policy.get("re_enter_gates", True))
         if may_adopt and (champion_is_todo or winner["cost_rank"] < champion_rank
@@ -156,7 +163,18 @@ def main() -> None:
             subprocess.run([sys.executable, str(SCRIPTS / "qa_agent_package.py"), str(pkg)],
                            capture_output=True, text=True)
         else:
-            decision["outcome"] = "proposal_queued (policy/holdout/flag)"
+            if not real_evidence:
+                decision["outcome"] = "proposal_queued_adoption_blocked_stub_executor"
+                ledger = pkg / "exports" / "improvement_ledger.jsonl"
+                ledger.parent.mkdir(parents=True, exist_ok=True)
+                with ledger.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps({"node_id": node_id,
+                                        "adopted": None,
+                                        "candidate": winner["model"],
+                                        "reason": "adoption_blocked_stub_executor",
+                                        "evidence": decision["winner"]["holdout"]}) + "\n")
+            else:
+                decision["outcome"] = "proposal_queued (policy/holdout/flag)"
     else:
         decision["outcome"] = "champion_stands"
 

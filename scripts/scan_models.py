@@ -25,6 +25,8 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from factory_config import load_config  # noqa: E402
 CATALOG = json.loads((Path(__file__).resolve().parent / "model_catalog.json").read_text(encoding="utf-8"))
 SCAN_PATH = ROOT / ".factory-scan.json"
 CONFIG_PATH = ROOT / "factory.config.json"
@@ -36,6 +38,8 @@ def env_present(spec) -> bool:
 
 
 def detect_providers() -> dict:
+    cfg = load_config()
+    local_cfg = ((cfg.get("model_preferences") or {}).get("local") or {})
     providers = {}
     for name, spec in CATALOG["providers"].items():
         if name == "ollama":
@@ -45,15 +49,34 @@ def detect_providers() -> dict:
         if name == "anthropic" and shutil.which(spec.get("oauth_cli", "claude")):
             available, via = True, (via or "oauth-cli")
         providers[name] = {"available": available, "via": via}
-    # Ollama: ping locally, list installed models
-    endpoint = CATALOG["providers"]["ollama"]["endpoint"]
+    # Ollama-native: honor factory.config.json model_preferences.local.endpoint.
+    endpoint = (local_cfg.get("endpoint") if local_cfg.get("provider") in (None, "ollama", "ollama-native")
+                else CATALOG["providers"]["ollama"]["endpoint"])
+    endpoint = endpoint or CATALOG["providers"]["ollama"]["endpoint"]
     installed: list[str] = []
     try:
-        with urllib.request.urlopen(f"{endpoint}/api/tags", timeout=2) as r:
+        with urllib.request.urlopen(f"{endpoint.rstrip('/')}/api/tags", timeout=2) as r:
             installed = [m["name"] for m in json.loads(r.read()).get("models", [])]
-        providers["ollama"] = {"available": True, "via": "local", "models": installed}
+        providers["ollama"] = {"available": True, "via": "local", "endpoint": endpoint, "models": installed}
     except Exception:
-        providers["ollama"] = {"available": False, "via": None, "models": []}
+        providers["ollama"] = {"available": False, "via": None, "endpoint": endpoint, "models": []}
+
+    # OpenAI-compatible local (mlx-lm, LM Studio, vLLM). Optional because many
+    # local servers do not implement /models; configured models still flow via factory_config.
+    openai_local_endpoint = local_cfg.get("endpoint") or "http://localhost:8000/v1"
+    local_available = False
+    local_models: list[str] = []
+    if local_cfg.get("provider") in {"openai-compatible-local", "local-openai-compatible"}:
+        try:
+            with urllib.request.urlopen(f"{openai_local_endpoint.rstrip('/')}/models", timeout=2) as r:
+                data = json.loads(r.read())
+            local_models = [m.get("id") for m in data.get("data", []) if m.get("id")]
+            local_available = True
+        except Exception:
+            local_models = list(local_cfg.get("models") or [])
+            local_available = bool(local_models)
+    providers["openai-compatible-local"] = {"available": local_available, "via": "local",
+                                             "endpoint": openai_local_endpoint, "models": local_models}
     return providers
 
 
@@ -67,7 +90,12 @@ def build_ladder(providers: dict) -> list[dict]:
             continue  # replaced by actually-installed models below
         ladder.append({k: m[k] for k in ("id", "provider", "cost_rank", "tier") if k in m})
     for name in providers.get("ollama", {}).get("models", []):
-        ladder.append({"id": f"ollama/{name}", "provider": "ollama", "cost_rank": 0, "tier": "local"})
+        ladder.append({"id": f"ollama/{name}", "provider": "ollama", "cost_rank": 0, "tier": "local",
+                       "endpoint": providers.get("ollama", {}).get("endpoint")})
+    for name in providers.get("openai-compatible-local", {}).get("models", []):
+        ladder.append({"id": f"local-openai-compatible/{name}", "provider": "openai-compatible-local",
+                       "cost_rank": 0, "tier": "local",
+                       "endpoint": providers.get("openai-compatible-local", {}).get("endpoint")})
     ladder.sort(key=lambda m: (m["cost_rank"], m["id"]))
     return ladder
 
