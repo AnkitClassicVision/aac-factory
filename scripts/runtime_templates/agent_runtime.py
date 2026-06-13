@@ -181,6 +181,52 @@ def _adapter_card_fields(adapter: dict | None) -> dict:
     }
 
 
+def _as_ref_list(value) -> list[str]:
+    if value is None:
+        return []
+    raw = value if isinstance(value, list) else [value]
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, dict):
+            out.append(item.get("definition_ref") or item.get("source_of_truth_ref") or json.dumps(item, sort_keys=True))
+        elif item not in (None, "", []):
+            out.append(str(item))
+    return out
+
+
+def _tbr_card_fields(node: dict, ctx: dict) -> dict:
+    gate = node.get("tbr_gate") or {}
+    required = bool(gate.get("required", False))
+    translator = gate.get("translator") or {}
+    bouncer = gate.get("bouncer") or {}
+    recorder = gate.get("recorder") or {}
+    definition_refs = (_as_ref_list(translator.get("definition_refs"))
+                       or _as_ref_list(translator.get("canonical_definitions")))
+    semantic_refs = (_as_ref_list(translator.get("source_of_truth_refs"))
+                     or _as_ref_list(ctx.get("_source_refs"))
+                     or [GRAPH.get("compiled_from", "process/workflow.aac.json")])
+    policy_ref = str(bouncer.get("effective_permission_path") or bouncer.get("policy_engine_ref") or "compiled-runtime-no-external-effectors")
+    return {
+        "tbr_required": required,
+        "tbr": {
+            "definition_refs": definition_refs,
+            "permission_decision": {
+                "allowed": True,
+                "policy_ref": policy_ref,
+                "reason": "runtime has no external effectors; node access is constrained to supplied context, handlers, and card policy refs",
+            },
+            "semantic_source_refs": semantic_refs,
+            "recipient_ref": str(ctx.get("_recipient_ref") or ctx.get("_actor_ref") or "internal_runtime"),
+            "audit_notes": "TBR proof emitted by AAC Factory runtime; live API/resource enforcement must still happen at the source/proxy boundary.",
+            "trace_fields": recorder.get("trace_fields") or [
+                "run_id", "workflow", "node_id", "runtime_mode", "input_ref", "output_ref",
+                "source_refs", "definition_refs", "permission_decision", "gate_outcomes", "refuse",
+                "external_actions_taken",
+            ],
+        },
+    }
+
+
 def run_graph(trigger_ctx: dict | None = None, *, parent_run_id: str | None = None,
               candidate_ref: str | None = None) -> dict:
     run_id = f"run-{uuid.uuid4().hex[:10]}"
@@ -214,6 +260,7 @@ def run_graph(trigger_ctx: dict | None = None, *, parent_run_id: str | None = No
                                or (f"routed to {nxt} by edge condition" if nxt in ("refuse_sink", "hard_refuse_sink") else ""))},
             escalation={"escalated": bool(out.get("_below_floor")),
                         "reason": "confidence_below_floor" if out.get("_below_floor") else ""},
+            **_tbr_card_fields(node, ctx),
             **_adapter_card_fields(adapter),
         )
         runcard.write_run_card(PKG, rc)

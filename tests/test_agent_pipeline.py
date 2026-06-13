@@ -149,11 +149,16 @@ def test_pipeline() -> None:
         assert any("tension" in f for f in cw["flags"]), "tension edge must surface as a flag"
 
         run([PY, "scripts/concept_to_process.py", str(pkg)], work)
+        wf = json.loads((pkg / "process" / "workflow.aac.json").read_text(encoding="utf-8"))
+        assert wf["tbr_gate"]["translator"]["raw_query_policy"].startswith("agents_may_not_query_raw")
+        assert wf["tbr_gate"]["recorder"]["run_card_required"] is True
         for nid in ("t-intake", "t-judge", "t-review"):
             card = json.loads((pkg / "process" / "nodes" / f"{nid}.aac.json").read_text(encoding="utf-8"))
             assert card["atlas_ref"] == ATLAS["process_map"][nid]
             assert card["concept_ref"].startswith("node_"), f"{nid} concept_ref unresolved"
             assert card["telemetry"]["run_card_required"] is True
+            assert card["tbr_gate"]["bouncer"]["human_identity_passthrough"] == "required"
+            assert card["tbr_gate"]["recorder"]["permission_decision_logged"] is True
         judge = json.loads((pkg / "process" / "nodes" / "t-judge.aac.json").read_text(encoding="utf-8"))
         assert judge["prompt_ref"] == "process/prompts/t-judge.md"
         assert (pkg / "process" / "prompts" / "t-judge.md").exists()
@@ -161,6 +166,8 @@ def test_pipeline() -> None:
         run([PY, "scripts/validate_agent_package.py", str(pkg), "--strict"], work)
         report = json.loads((pkg / "exports" / "readiness_report.json").read_text(encoding="utf-8"))
         assert report["ladder"]["R0_design_scaffold"]["pass"] is True
+        assert report["tbr"]["complete"] is False, "generated TBR defaults must block certification until owners fill refs/policies"
+        assert report["summary"]["tbr_blockers"] > 0
         assert report["ladder"]["R3_supervised_send"]["pass"] is False, "R3+ must stay a human gate"
         assert report["summary"]["golden_graded"] == 3
 
@@ -229,6 +236,28 @@ def test_run_card_contract() -> None:
                    "model_verified": True, "verification_source": "test",
                    "executor": "test", "adapter_version": "test", "prompt_version": "1.0.0"})
         assert runcard.validate_run_card(rc) == []
+        rc_bad_tbr = dict(rc, tbr_required=True, tbr={})
+        assert any("TBR" in e for e in runcard.validate_run_card(rc_bad_tbr)), "required TBR proof must be physical"
+        rc_tbr = runcard.new_run_card(run_id="r1t", workflow="t", node_id="t-judge", runtime_mode="C",
+                                      ts_start="2026-06-09T00:00:00Z", ts_end="2026-06-09T00:00:01Z",
+                                      input_ref="in", output_ref="out", source_refs=["s1"],
+                                      confidence=0.91, requested_model="m", actual_model="m",
+                                      model_verified=True, verification_source="test", executor="test",
+                                      adapter_version="test", prompt_version="1.0.0", tbr_required=True,
+                                      tbr={"definition_refs": ["def:active-customer"],
+                                           "semantic_source_refs": ["warehouse.metric_view"],
+                                           "permission_decision": {"allowed": True, "policy_ref": "policy:user-via-agent", "reason": "test"}})
+        assert runcard.validate_run_card(rc_tbr) == []
+        rc_todo_tbr: dict = dict(rc_tbr, run_id="r1todo", certification_eligible=True, certification_blockers=[])
+        rc_todo_tbr["tbr"] = {
+            "definition_refs": ["TODO: semantic definition"],
+            "semantic_source_refs": ["warehouse.metric_view"],
+            "permission_decision": {"allowed": True, "policy_ref": "policy:user-via-agent", "reason": "test"},
+            "trace_fields": list(runcard.TBR_TRACE_FIELDS),
+        }
+        assert runcard.validate_run_card(rc_todo_tbr) == []
+        assert rc_todo_tbr["certification_eligible"] is False
+        assert "tbr_contains_todo" in rc_todo_tbr["certification_blockers"]
         assert rc["usage"]["tokens_in"] == "unknown" and rc["cost"]["tokens_in"] == "unknown"
         runcard.write_run_card(pkg, rc)
         assert (pkg / "process" / "run-cards" / "t-judge" / "r1.json").exists()
@@ -239,7 +268,64 @@ def test_run_card_contract() -> None:
     print("[OK] run-card contract test passed")
 
 
+def test_tbr_gate_fail_closed_contract() -> None:
+    sys.path.insert(0, str(REPO / "scripts"))
+    import tbr_gate  # type: ignore[reportMissingImports]
+
+    workflow_missing_cadence = {
+        "max_lane": "draft",
+        "tbr_gate": {
+            "required": True,
+            "translator": {
+                "canonical_definitions": [{"term": "active_customer", "definition_ref": "defs/active", "source_of_truth_ref": "semantic/active"}],
+                "source_of_truth_refs": ["semantic/active"],
+                "raw_query_policy": "semantic_gate_required",
+            },
+            "bouncer": {"effective_permission_model": "user_via_agent", "policy_engine_ref": "policy/runtime"},
+            "recorder": {
+                "run_card_required": True,
+                "trace_fields": list(tbr_gate.TBR_TRACE_FIELDS),
+                "retention_class": "six_months",
+                "tamper_evidence": "append_only_log",
+            },
+        },
+    }
+    assert any("review_cadence" in e for e in tbr_gate.validate_workflow_tbr(workflow_missing_cadence))
+
+    workflow_required_false = {"max_lane": "draft", "tbr_gate": {"required": False}}
+    node_required_false = {"node_id": "n", "runtime_mode": "C", "tbr_gate": {"required": False}}
+    assert tbr_gate.tbr_required_for_workflow(workflow_required_false) is True
+    assert tbr_gate.tbr_required_for_node(workflow_required_false, node_required_false) is True
+    workflow_exempt = {"max_lane": "internal_artifact_only", "tbr_gate": {
+        "required": False, "non_certifying": True, "exemption_reason": "offline fixture package"}}
+    assert tbr_gate.tbr_required_for_workflow(workflow_exempt) is False
+
+    node_missing_forbidden = {
+        "node_id": "n",
+        "runtime_mode": "C",
+        "tbr_gate": {
+            "required": True,
+            "translator": {"definition_refs": ["defs/active"], "source_of_truth_refs": ["semantic/active"]},
+            "bouncer": {
+                "agent_identity": "agent:n",
+                "human_identity_passthrough": "required",
+                "allowed_resources": ["deal:read"],
+                "effective_permission_path": "user->agent->policy->deal",
+                "task_scope": "read deal for current run",
+            },
+            "recorder": {
+                "run_card_required": True,
+                "trace_fields": list(tbr_gate.TBR_TRACE_FIELDS),
+                "permission_decision_logged": True,
+            },
+        },
+    }
+    assert any("forbidden_resources" in e for e in tbr_gate.validate_node_tbr(workflow_missing_cadence, node_missing_forbidden))
+    print("[OK] TBR gate fail-closed contract test passed")
+
+
 if __name__ == "__main__":
     test_pipeline()
     test_runtime_suggester()
     test_run_card_contract()
+    test_tbr_gate_fail_closed_contract()

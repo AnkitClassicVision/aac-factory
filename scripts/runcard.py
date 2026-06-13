@@ -22,6 +22,47 @@ GATE_KEYS = ("input", "output", "cross_check", "action")
 ESCALATION_REASONS = ("hard_refuse", "confidence_below_floor", "gate_failure", "qa_block", "drift_alarm")
 UNKNOWN_USAGE = {"tokens_in": "unknown", "tokens_out": "unknown", "cost_usd": "unknown",
                  "usage_source": "unknown", "actual_usage_available": False}
+TBR_TRACE_FIELDS = [
+    "run_id", "workflow", "node_id", "runtime_mode", "input_ref", "output_ref",
+    "source_refs", "definition_refs", "permission_decision", "gate_outcomes", "refuse",
+    "external_actions_taken",
+]
+
+
+def _normalize_tbr(tbr: dict[str, Any] | None) -> dict[str, Any]:
+    base = {
+        "definition_refs": [],
+        "permission_decision": {"allowed": None, "policy_ref": "", "reason": ""},
+        "semantic_source_refs": [],
+        "recipient_ref": "",
+        "audit_notes": "",
+        "trace_fields": list(TBR_TRACE_FIELDS),
+    }
+    if isinstance(tbr, dict):
+        for k, v in tbr.items():
+            if k == "permission_decision" and isinstance(v, dict):
+                merged = dict(base["permission_decision"])
+                merged.update(v)
+                base[k] = merged
+            else:
+                base[k] = v
+    return base
+
+
+def _tbr_certification_blockers(tbr: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    if not tbr.get("definition_refs"):
+        blockers.append("tbr_definition_refs_missing")
+    if not tbr.get("semantic_source_refs"):
+        blockers.append("tbr_semantic_source_refs_missing")
+    pd = tbr.get("permission_decision") or {}
+    if pd.get("allowed") is None or not pd.get("policy_ref"):
+        blockers.append("tbr_permission_decision_incomplete")
+    if set(TBR_TRACE_FIELDS) - set(tbr.get("trace_fields") or []):
+        blockers.append("tbr_trace_fields_incomplete")
+    if "TODO" in json.dumps(tbr, ensure_ascii=False):
+        blockers.append("tbr_contains_todo")
+    return blockers
 
 
 def _usage(fields: dict[str, Any]) -> dict[str, Any]:
@@ -43,6 +84,8 @@ def _usage(fields: dict[str, Any]) -> dict[str, Any]:
 
 def new_run_card(**fields) -> dict:
     fields = dict(fields)
+    tbr_required = bool(fields.pop("tbr_required", False))
+    tbr = _normalize_tbr(fields.pop("tbr", None))
     model = fields.get("model")
     requested_model = fields.get("requested_model", model)
     usage = _usage(fields)
@@ -73,6 +116,8 @@ def new_run_card(**fields) -> dict:
         "refuse": {"refused": False, "hard": False, "reason": ""},
         "external_actions_taken": 0,
         "source_refs": [],
+        "tbr_required": tbr_required,
+        "tbr": tbr,
         "escalation": {"escalated": False, "reason": ""},
         "qa": {"sampled": False, "verdict": None},
     }
@@ -91,6 +136,12 @@ def new_run_card(**fields) -> dict:
         blockers = set(card.get("certification_blockers") or [])
         if not card.get("model_verified"):
             blockers.add("model_identity_unverified")
+        if blockers:
+            card["certification_blockers"] = sorted(blockers)
+            card["certification_eligible"] = False
+    if card.get("tbr_required"):
+        blockers = set(card.get("certification_blockers") or [])
+        blockers.update(_tbr_certification_blockers(card.get("tbr") or {}))
         if blockers:
             card["certification_blockers"] = sorted(blockers)
             card["certification_eligible"] = False
@@ -119,6 +170,22 @@ def validate_run_card(card: dict) -> list[str]:
     ext = card.get("external_actions_taken")
     if not isinstance(ext, int) or ext < 0:
         errors.append("external_actions_taken must be an integer >= 0")
+    if card.get("tbr_required"):
+        tbr = _normalize_tbr(card.get("tbr") or {})
+        card["tbr"] = tbr
+        for f in ("definition_refs", "permission_decision", "semantic_source_refs", "trace_fields"):
+            if f not in tbr or tbr[f] in (None, "", [], {}):
+                errors.append(f"TBR run proof requires {f}")
+        pd = tbr.get("permission_decision") or {}
+        if pd.get("allowed") is None:
+            errors.append("TBR permission_decision.allowed must be true/false")
+        if not pd.get("policy_ref"):
+            errors.append("TBR permission_decision.policy_ref required")
+        blockers = set(card.get("certification_blockers") or [])
+        blockers.update(_tbr_certification_blockers(tbr))
+        if blockers:
+            card["certification_blockers"] = sorted(blockers)
+            card["certification_eligible"] = False
     esc = card.get("escalation") or {}
     if esc.get("escalated") and esc.get("reason") not in ESCALATION_REASONS:
         errors.append(f"escalation reason must be one of {ESCALATION_REASONS}")

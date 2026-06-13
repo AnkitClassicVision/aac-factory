@@ -77,6 +77,7 @@ def test_compiler() -> None:
         build = pkg / "build"
         assert (build / "agent" / "main.py").exists() and (build / "agent" / "nodes.json").exists()
         graph = json.loads((build / "agent" / "nodes.json").read_text(encoding="utf-8"))
+        assert graph["nodes"]["t-judge"]["tbr_gate"]["required"] is True
         # synthetic package has graded goldens (R2) but TODO fields (R1 blocked) -> shadow forced
         assert graph["lane"] == "internal_artifact_only", "shadow lane must be forced on R1-blocked package"
 
@@ -97,6 +98,10 @@ def test_compiler() -> None:
             "H node must queue for the human"
         runs = list((pkg / "process" / "run-cards" / "t-judge").glob("*.json"))
         assert runs, "run card per node execution"
+        card = json.loads(runs[-1].read_text(encoding="utf-8"))
+        assert card["tbr_required"] is True
+        assert card["tbr"]["permission_decision"]["allowed"] is True
+        assert "tbr_contains_todo" in card["certification_blockers"], "shadow package must not certify with TODO TBR refs"
 
         # Low confidence -> below floor -> routes toward human/refuse, escalation recorded
         r = run([PY, str(build / "agent" / "main.py"), "{}"], work,
