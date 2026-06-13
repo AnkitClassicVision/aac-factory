@@ -329,7 +329,7 @@ def run_batch(candidates: list[Any], base_ctx: dict) -> dict:
         input_ref=base_ctx.get("_ref", "batch"), output_ref="process/run-cards/_runs/" + batch_id + ".json",
         gate_outcomes={"input": "pass", "output": "pass", "cross_check": "not_run", "action": "pass (no effectors exist)"},
         refuse={"refused": False, "hard": False, "reason": ""}, source_refs=[GRAPH["compiled_from"]],
-        external_actions_taken=0,
+        external_actions_taken=0, tbr_required=False,
     )
     runcard.write_run_card(PKG, rc)
     return parent

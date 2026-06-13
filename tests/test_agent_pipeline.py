@@ -235,7 +235,20 @@ def test_run_card_contract() -> None:
         rc.update({"confidence": 0.91, "requested_model": "m", "actual_model": "m",
                    "model_verified": True, "verification_source": "test",
                    "executor": "test", "adapter_version": "test", "prompt_version": "1.0.0"})
-        assert runcard.validate_run_card(rc) == []
+        tbr_missing_errors = runcard.validate_run_card(rc)
+        assert any("TBR run proof requires" in e for e in tbr_missing_errors)
+        assert rc["tbr_required"] is True
+        assert rc["certification_eligible"] is False
+        assert "tbr_definition_refs_missing" in rc["certification_blockers"]
+        rc_explicit_no_tbr = runcard.new_run_card(run_id="r1no", workflow="t", node_id="t-judge", runtime_mode="C",
+                                                   ts_start="2026-06-09T00:00:00Z", ts_end="2026-06-09T00:00:01Z",
+                                                   input_ref="in", output_ref="out", source_refs=["s1"], confidence=0.91,
+                                                   requested_model="m", actual_model="m", model_verified=True,
+                                                   verification_source="test", executor="test", adapter_version="test",
+                                                   prompt_version="1.0.0", tbr_required=False)
+        assert runcard.validate_run_card(rc_explicit_no_tbr) == []
+        assert rc_explicit_no_tbr["certification_eligible"] is False
+        assert "tbr_not_required_non_certifying" in rc_explicit_no_tbr["certification_blockers"]
         rc_bad_tbr = dict(rc, tbr_required=True, tbr={})
         assert any("TBR" in e for e in runcard.validate_run_card(rc_bad_tbr)), "required TBR proof must be physical"
         rc_tbr = runcard.new_run_card(run_id="r1t", workflow="t", node_id="t-judge", runtime_mode="C",
@@ -282,14 +295,19 @@ def test_run_card_contract() -> None:
         assert rc_placeholder_tbr["certification_eligible"] is False
         assert "tbr_contains_placeholder" in rc_placeholder_tbr["certification_blockers"]
         assert "tbr_permission_scope_unbounded" in rc_placeholder_tbr["certification_blockers"]
+        rc_shared_service_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_shared_service_tbr["tbr"]["permission_decision"]["policy_ref"] = "policy:shared-service-account"
+        assert runcard.validate_run_card(rc_shared_service_tbr) == []
+        assert rc_shared_service_tbr["certification_eligible"] is False
+        assert "tbr_permission_scope_unbounded" in rc_shared_service_tbr["certification_blockers"]
         rc_string_allowed: dict = json.loads(json.dumps(rc_tbr))
         rc_string_allowed["tbr"]["permission_decision"]["allowed"] = "true"
         string_allowed_errors = runcard.validate_run_card(rc_string_allowed)
         assert any("allowed must be true/false" in e for e in string_allowed_errors)
         assert rc["usage"]["tokens_in"] == "unknown" and rc["cost"]["tokens_in"] == "unknown"
-        runcard.write_run_card(pkg, rc)
-        assert (pkg / "process" / "run-cards" / "t-judge" / "r1.json").exists()
-        rc2 = dict(rc, run_id="r2", refuse={"refused": True, "hard": True, "reason": "identity unclear"})
+        runcard.write_run_card(pkg, rc_tbr)
+        assert (pkg / "process" / "run-cards" / "t-judge" / "r1t.json").exists()
+        rc2 = dict(rc_tbr, run_id="r2", refuse={"refused": True, "hard": True, "reason": "identity unclear"})
         runcard.write_run_card(pkg, rc2)
         assert list((pkg / "process" / "run-cards" / "_review_queue").glob("*.json")), \
             "refusals must land in the human-over-the-loop review queue"
@@ -382,6 +400,11 @@ def test_tbr_gate_fail_closed_contract() -> None:
     assert any("allowed_resources" in e for e in bad_node_errors)
     assert any("task_scope" in e for e in bad_node_errors)
     assert any("recorder.trace_fields" in e for e in bad_node_errors)
+    node_shared_service = json.loads(json.dumps(node_missing_forbidden))
+    node_shared_service["tbr_gate"]["bouncer"]["forbidden_resources"] = ["hr:salary"]
+    node_shared_service["tbr_gate"]["bouncer"]["agent_identity"] = "shared-service-account"
+    shared_service_errors = tbr_gate.validate_node_tbr(workflow_missing_cadence, node_shared_service)
+    assert any("agent_identity" in e and "unbounded" in e for e in shared_service_errors)
     print("[OK] TBR gate fail-closed contract test passed")
 
 

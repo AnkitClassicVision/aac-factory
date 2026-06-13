@@ -208,7 +208,8 @@ def _listish(value: Any) -> list[Any]:
 def _bad_permission_blob(value: Any) -> bool:
     blob = _text_blob(value)
     bad_terms = (
-        "god-mode", "god mode", "shared_service", "shared service", "all-powerful",
+        "god-mode", "god mode", "shared_service", "shared service", "shared-service",
+        "shared_service_account", "shared service account", "shared-service-account", "all-powerful",
         "all_resources", "all resources", "any resources", "any resource", "any request",
         "all tables", "entire crm", "entire database", "everything",
         "admin everywhere", "root access", "forever", "unbounded", "*:*", ":*", "/*", ".*",

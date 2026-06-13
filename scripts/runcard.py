@@ -21,6 +21,7 @@ RUN_CARD_REQUIRED = [
 ]
 GATE_KEYS = ("input", "output", "cross_check", "action")
 ESCALATION_REASONS = ("hard_refuse", "confidence_below_floor", "gate_failure", "qa_block", "drift_alarm")
+TBR_REQUIRED_MODES = {"C", "A", "D", "H"}
 UNKNOWN_USAGE = {"tokens_in": "unknown", "tokens_out": "unknown", "cost_usd": "unknown",
                  "usage_source": "unknown", "actual_usage_available": False}
 TBR_TRACE_FIELDS = [
@@ -48,7 +49,8 @@ def _contains_placeholder(value: Any) -> bool:
 
 def _bad_permission_blob(value: Any) -> bool:
     blob = _text_blob(value)
-    terms = ("god-mode", "god mode", "shared_service", "shared service", "all_resources",
+    terms = ("god-mode", "god mode", "shared_service", "shared service", "shared-service",
+             "shared_service_account", "shared service account", "shared-service-account", "all_resources",
              "all resources", "any resources", "any resource", "any request", "all tables",
              "entire crm", "entire database", "everything", "root access", "forever",
              "unbounded", "*:*", ":*", "/*", ".*")
@@ -128,7 +130,9 @@ def _usage(fields: dict[str, Any]) -> dict[str, Any]:
 
 def new_run_card(**fields) -> dict:
     fields = dict(fields)
-    tbr_required = bool(fields.pop("tbr_required", False))
+    tbr_required_raw = fields.pop("tbr_required", None)
+    runtime_mode = str(fields.get("runtime_mode") or "")
+    tbr_required = (runtime_mode in TBR_REQUIRED_MODES) if tbr_required_raw is None else bool(tbr_required_raw)
     tbr = _normalize_tbr(fields.pop("tbr", None))
     model = fields.get("model")
     requested_model = fields.get("requested_model", model)
@@ -189,6 +193,11 @@ def new_run_card(**fields) -> dict:
                 tbr[key] = card[key]
         if not tbr.get("prompt_version") and card.get("prompt_version"):
             tbr["prompt_version"] = card["prompt_version"]
+    if card.get("runtime_mode") in TBR_REQUIRED_MODES and not card.get("tbr_required"):
+        blockers = set(card.get("certification_blockers") or [])
+        blockers.add("tbr_not_required_non_certifying")
+        card["certification_blockers"] = sorted(blockers)
+        card["certification_eligible"] = False
     if card["runtime_mode"] in {"C", "A"}:
         blockers = set(card.get("certification_blockers") or [])
         if not card.get("model_verified"):
@@ -227,6 +236,10 @@ def validate_run_card(card: dict) -> list[str]:
     ext = card.get("external_actions_taken")
     if not isinstance(ext, int) or ext < 0:
         errors.append("external_actions_taken must be an integer >= 0")
+    if card.get("runtime_mode") in TBR_REQUIRED_MODES and not card.get("tbr_required"):
+        blockers = set(card.get("certification_blockers") or [])
+        if card.get("certification_eligible") is not False or "tbr_not_required_non_certifying" not in blockers:
+            errors.append("certifying run card requires TBR proof or explicit non-certifying blocker")
     if card.get("tbr_required"):
         tbr = _normalize_tbr(card.get("tbr") or {})
         card["tbr"] = tbr
