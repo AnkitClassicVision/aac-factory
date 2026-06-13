@@ -55,7 +55,10 @@ def _contains_placeholder(value: Any) -> bool:
     terms = ("todo", "placeholder", "tbd", "to be decided", "n/a", "not applicable",
              "unknown", "fill me", "dummy", "sample", "example", "\"none\"", "'none'",
              ": none", "= none", "...")
-    return any(t in blob for t in terms)
+    if any(t in blob for t in terms):
+        return True
+    return any(re.search(r'(^|[^a-z0-9_-])none([^a-z0-9_-]|$)', text)
+               for text in _iter_strings(value))
 
 
 def _contains_no_proof_sentinel(value: Any) -> bool:

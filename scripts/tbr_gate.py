@@ -66,6 +66,13 @@ def _iter_strings(value: Any):
         yield str(value).strip().lower()
 
 
+def _has_placeholder_token(value: Any) -> bool:
+    for text in _iter_strings(value):
+        if re.search(r'(^|[^a-z0-9_-])none([^a-z0-9_-]|$)', text):
+            return True
+    return False
+
+
 def _has_no_proof_sentinel(value: Any) -> bool:
     fixed_terms = (
         "none:", "not_applicable:", "not applicable:", "no_definition", "no definition",
@@ -257,7 +264,9 @@ def _placeholder_blob(value: Any) -> bool:
         "unknown", "fill me", "owner picks", "dummy", "sample", "example",
         "\"none\"", "'none'", ": none", "= none", "...",
     )
-    return any(t.lower() in blob for t in placeholder_terms) or _has_no_proof_sentinel(value)
+    return (any(t.lower() in blob for t in placeholder_terms)
+            or _has_placeholder_token(value)
+            or _has_no_proof_sentinel(value))
 
 
 def _unsafe_tbr_value(value: Any) -> bool:

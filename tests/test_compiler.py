@@ -103,6 +103,22 @@ def test_compiler() -> None:
         assert card["tbr"]["permission_decision"]["allowed"] is True
         assert "tbr_contains_todo" in card["certification_blockers"], "shadow package must not certify with TODO TBR refs"
 
+        # Required TBR with no explicit Translator source refs must not backfill compiled workflow path as proof.
+        graph_path = build / "agent" / "nodes.json"
+        missing_source_graph = json.loads(graph_path.read_text(encoding="utf-8"))
+        missing_source_graph["nodes"]["t-judge"]["tbr_gate"]["translator"].pop("source_of_truth_refs", None)
+        graph_path.write_text(json.dumps(missing_source_graph, indent=2), encoding="utf-8")
+        before_runs = {p.name for p in (pkg / "process" / "run-cards" / "t-judge").glob("*.json")}
+        r = run([PY, str(build / "agent" / "main.py"), "{}"], work,
+                env={"FACTORY_FAKE_LLM": "1", "FACTORY_FAKE_CONFIDENCE": "0.95"})
+        assert r.returncode == 0, r.stdout + r.stderr
+        new_runs = [p for p in (pkg / "process" / "run-cards" / "t-judge").glob("*.json") if p.name not in before_runs]
+        assert new_runs, "missing-source run must emit a new run card"
+        missing_source_card = json.loads(new_runs[-1].read_text(encoding="utf-8"))
+        assert missing_source_card["tbr"]["semantic_source_refs"] == ["audit:no_source"]
+        assert "tbr_contains_no_proof_sentinel" in missing_source_card["certification_blockers"]
+        graph_path.write_text(json.dumps(graph, indent=2), encoding="utf-8")
+
         # Low confidence -> below floor -> routes toward human/refuse, escalation recorded
         r = run([PY, str(build / "agent" / "main.py"), "{}"], work,
                 env={"FACTORY_FAKE_LLM": "1", "FACTORY_FAKE_CONFIDENCE": "0.2"})

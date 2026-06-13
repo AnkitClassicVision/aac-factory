@@ -295,6 +295,14 @@ def test_run_card_contract() -> None:
         assert rc_placeholder_tbr["certification_eligible"] is False
         assert "tbr_contains_placeholder" in rc_placeholder_tbr["certification_blockers"]
         assert "tbr_permission_scope_unbounded" in rc_placeholder_tbr["certification_blockers"]
+        rc_none_selected_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_none_selected_tbr["tbr"]["definition_refs"] = ["none selected"]
+        rc_none_selected_tbr["tbr"]["semantic_source_refs"] = ["none selected"]
+        rc_none_selected_tbr["tbr"]["permission_decision"]["policy_ref"] = "none selected"
+        rc_none_selected_tbr["tbr"]["tamper_evidence"] = "none selected"
+        assert runcard.validate_run_card(rc_none_selected_tbr) == []
+        assert rc_none_selected_tbr["certification_eligible"] is False
+        assert "tbr_contains_placeholder" in rc_none_selected_tbr["certification_blockers"]
         no_proof_cases = {
             "definition_refs": ["no_definition"],
             "semantic_source_refs": ["no_source"],
@@ -401,6 +409,15 @@ def test_tbr_gate_fail_closed_contract() -> None:
     workflow_no_policy["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
     workflow_no_policy["tbr_gate"]["bouncer"]["policy_engine_ref"] = "no_policy"
     assert any("policy_engine_ref" in e for e in tbr_gate.validate_workflow_tbr(workflow_no_policy))
+    workflow_none_selected = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_none_selected["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    workflow_none_selected["tbr_gate"]["translator"]["source_of_truth_refs"] = ["none selected"]
+    workflow_none_selected["tbr_gate"]["bouncer"]["policy_engine_ref"] = "none selected"
+    workflow_none_selected["tbr_gate"]["recorder"]["tamper_evidence"] = "none selected"
+    none_selected_errors = tbr_gate.validate_workflow_tbr(workflow_none_selected)
+    assert any("source_of_truth_refs" in e for e in none_selected_errors)
+    assert any("policy_engine_ref" in e for e in none_selected_errors)
+    assert any("tamper_evidence" in e for e in none_selected_errors)
     workflow_audit_no_policy = json.loads(json.dumps(workflow_missing_cadence))
     workflow_audit_no_policy["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
     workflow_audit_no_policy["tbr_gate"]["bouncer"]["policy_engine_ref"] = "audit:no_policy"
@@ -426,7 +443,7 @@ def test_tbr_gate_fail_closed_contract() -> None:
     workflow_exempt = {"max_lane": "internal_artifact_only", "tbr_gate": {
         "required": False, "non_certifying": True, "exemption_reason": "offline fixture package"}}
     assert tbr_gate.tbr_required_for_workflow(workflow_exempt) is False
-    for placeholder_reason in ("todo later", "n/a", "none"):
+    for placeholder_reason in ("todo later", "n/a", "none", "none selected"):
         workflow_bad_exempt = {"max_lane": "internal_artifact_only", "tbr_gate": {
             "required": False, "non_certifying": True, "exemption_reason": placeholder_reason}}
         assert tbr_gate.tbr_required_for_workflow(workflow_bad_exempt) is True
@@ -463,6 +480,16 @@ def test_tbr_gate_fail_closed_contract() -> None:
     node_no_policy = json.loads(json.dumps(node_valid_tbr))
     node_no_policy["tbr_gate"]["bouncer"]["effective_permission_path"] = "no_policy"
     assert any("effective_permission_path" in e for e in tbr_gate.validate_node_tbr(workflow_missing_cadence, node_no_policy))
+    node_none_selected = json.loads(json.dumps(node_valid_tbr))
+    node_none_selected["tbr_gate"]["translator"]["definition_refs"] = ["none selected"]
+    node_none_selected["tbr_gate"]["translator"]["source_of_truth_refs"] = ["none selected"]
+    node_none_selected["tbr_gate"]["bouncer"]["effective_permission_path"] = "none selected"
+    node_none_selected["tbr_gate"]["recorder"]["tamper_evidence"] = "none selected"
+    none_selected_node_errors = tbr_gate.validate_node_tbr(workflow_missing_cadence, node_none_selected)
+    assert any("definition_refs" in e for e in none_selected_node_errors)
+    assert any("source_of_truth_refs" in e for e in none_selected_node_errors)
+    assert any("effective_permission_path" in e for e in none_selected_node_errors)
+    assert any("tamper_evidence" in e for e in none_selected_node_errors)
     node_audit_no_policy = json.loads(json.dumps(node_valid_tbr))
     node_audit_no_policy["tbr_gate"]["bouncer"]["effective_permission_path"] = "audit:no_policy"
     node_audit_no_policy["tbr_gate"]["translator"]["definition_refs"] = ["audit:no_definition"]

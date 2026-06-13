@@ -202,9 +202,11 @@ def _tbr_card_fields(node: dict, ctx: dict, output_ref: str) -> dict:
     recorder = gate.get("recorder") or {}
     definition_refs = (_as_ref_list(translator.get("definition_refs"))
                        or _as_ref_list(translator.get("canonical_definitions")))
-    semantic_refs = (_as_ref_list(translator.get("source_of_truth_refs"))
-                     or _as_ref_list(ctx.get("_source_refs"))
-                     or [GRAPH.get("compiled_from", "process/workflow.aac.json")])
+    explicit_semantic_refs = _as_ref_list(translator.get("source_of_truth_refs"))
+    semantic_refs = (explicit_semantic_refs
+                     or (["audit:no_source"] if required else (_as_ref_list(ctx.get("_source_refs"))
+                                                              or [GRAPH.get("compiled_from", "process/workflow.aac.json")]))
+                    )
     policy_ref = str(bouncer.get("effective_permission_path") or bouncer.get("policy_engine_ref") or "compiled-runtime-no-external-effectors")
     prompt_ref = str(node.get("prompt_ref") or (f"process/prompts/{node['node_id']}.md" if node.get("runtime_mode") in ("C", "A") else "audit:non_llm_node_prompt_absent"))
     prompt_version = str(node.get("prompt_version") or ("unknown" if node.get("runtime_mode") in ("C", "A") else "audit:non_llm_node_prompt_version_absent"))
