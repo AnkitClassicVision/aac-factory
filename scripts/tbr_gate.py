@@ -55,6 +55,33 @@ def _text_blob(*values: Any) -> str:
     return " ".join(json.dumps(v, ensure_ascii=False).lower() for v in values if v is not None)
 
 
+def _iter_strings(value: Any):
+    if isinstance(value, dict):
+        for v in value.values():
+            yield from _iter_strings(v)
+    elif isinstance(value, (list, tuple, set)):
+        for v in value:
+            yield from _iter_strings(v)
+    elif value is not None:
+        yield str(value).strip().lower()
+
+
+def _has_no_proof_sentinel(value: Any) -> bool:
+    fixed_terms = (
+        "none:", "not_applicable:", "not applicable:", "no_definition", "no definition",
+        "no_source", "no source", "no_policy", "no policy", "no_truth", "no truth",
+        "no_ref", "no ref", "no proof", "no-proof",
+    )
+    for text in _iter_strings(value):
+        if text.startswith("audit:"):
+            continue
+        if any(t in text for t in fixed_terms):
+            return True
+        if re.search(r'(^|[^a-z0-9])(no[_ -][a-z0-9][a-z0-9_-]*)', text):
+            return True
+    return False
+
+
 def tbr_exemption_valid(workflow: dict) -> bool:
     gate = workflow.get("tbr_gate") or {}
     lane = str(workflow.get("max_lane") or "")
@@ -230,12 +257,9 @@ def _placeholder_blob(value: Any) -> bool:
     placeholder_terms = (
         "TODO", "placeholder", "tbd", "to be decided", "n/a", "not applicable",
         "unknown", "fill me", "owner picks", "dummy", "sample", "example",
-        "\"none\"", "'none'", ": none", "= none", "none:", "not_applicable:",
-        "not applicable:", "no_definition", "no definition", "no_source", "no source",
-        "no_policy", "no policy", "no_truth", "no truth", "no_ref", "no ref",
-        "no proof", "no-proof", "...",
+        "\"none\"", "'none'", ": none", "= none", "...",
     )
-    return any(t.lower() in blob for t in placeholder_terms)
+    return any(t.lower() in blob for t in placeholder_terms) or _has_no_proof_sentinel(value)
 
 
 def _unsafe_tbr_value(value: Any) -> bool:

@@ -39,6 +39,17 @@ def _text_blob(value: Any) -> str:
         return str(value).lower()
 
 
+def _iter_strings(value: Any):
+    if isinstance(value, dict):
+        for v in value.values():
+            yield from _iter_strings(v)
+    elif isinstance(value, (list, tuple, set)):
+        for v in value:
+            yield from _iter_strings(v)
+    elif value is not None:
+        yield str(value).strip().lower()
+
+
 def _contains_placeholder(value: Any) -> bool:
     blob = _text_blob(value)
     terms = ("todo", "placeholder", "tbd", "to be decided", "n/a", "not applicable",
@@ -48,11 +59,17 @@ def _contains_placeholder(value: Any) -> bool:
 
 
 def _contains_no_proof_sentinel(value: Any) -> bool:
-    blob = _text_blob(value)
     terms = ("none:", "not_applicable:", "not applicable:", "no_definition", "no definition",
              "no_source", "no source", "no_policy", "no policy", "no_truth", "no truth",
              "no_ref", "no ref", "no proof", "no-proof")
-    return any(t in blob for t in terms)
+    for text in _iter_strings(value):
+        if text.startswith("audit:"):
+            continue
+        if any(t in text for t in terms):
+            return True
+        if re.search(r'(^|[^a-z0-9])(no[_ -][a-z0-9][a-z0-9_-]*)', text):
+            return True
+    return False
 
 
 def _bad_permission_blob(value: Any) -> bool:
@@ -121,7 +138,7 @@ def _tbr_certification_blockers(tbr: dict[str, Any]) -> list[str]:
         blockers.append("tbr_contains_no_proof_sentinel")
     if _contains_placeholder(tbr):
         blockers.append("tbr_contains_placeholder")
-    if _bad_permission_blob(tbr):
+    if _bad_permission_blob([pd.get("policy_ref"), pd.get("reason")]):
         blockers.append("tbr_permission_scope_unbounded")
     return blockers
 
