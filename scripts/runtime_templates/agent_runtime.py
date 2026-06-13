@@ -214,7 +214,7 @@ def _tbr_card_fields(node: dict, ctx: dict, output_ref: str) -> dict:
         "tbr_required": required,
         "prompt_ref": prompt_ref,
         "response_ref": output_ref,
-        "tool_call_refs": list(ctx.get("_tool_call_refs") or ["audit:no_tool_calls_executed"]),
+        "tool_call_refs": list(ctx.get("_tool_call_refs") or ["audit:zero_tool_calls_executed"]),
         "user_ref": user_ref,
         "recipient_ref": recipient_ref,
         "tbr": {
@@ -228,7 +228,7 @@ def _tbr_card_fields(node: dict, ctx: dict, output_ref: str) -> dict:
             "prompt_ref": prompt_ref,
             "prompt_version": prompt_version,
             "response_ref": output_ref,
-            "tool_call_refs": list(ctx.get("_tool_call_refs") or ["audit:no_tool_calls_executed"]),
+            "tool_call_refs": list(ctx.get("_tool_call_refs") or ["audit:zero_tool_calls_executed"]),
             "user_ref": user_ref,
             "recipient_ref": recipient_ref,
             "retention_class": recorder.get("retention_class") or "TODO: runtime log retention class",

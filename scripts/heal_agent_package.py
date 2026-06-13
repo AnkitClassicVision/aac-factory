@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 from concept_to_process import AUTOMATION_POLICY_DEFAULT, execution_block, objective_block, supervision_block
-from tbr_gate import default_node_tbr_gate, default_workflow_tbr_gate
+from tbr_gate import TBR_TRACE_FIELDS, default_node_tbr_gate, default_workflow_tbr_gate
 
 PROPOSED_ACTIONS = {
     "spine_locked": "Human: lock the spine in atlas/atlas.json (one falsifiable claim, 3-9 trunk nodes).",
@@ -56,6 +56,14 @@ def load(p: Path, default=None):
 
 def save(p: Path, data) -> None:
     p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _complete_trace_fields(existing) -> list[str]:
+    fields = list(existing or [])
+    for field in TBR_TRACE_FIELDS:
+        if field not in fields:
+            fields.append(field)
+    return fields
 
 
 def main() -> None:
@@ -117,8 +125,9 @@ def main() -> None:
                         changed_wf = True
                     else:
                         rec = wf.setdefault("tbr_gate", {}).setdefault("recorder", {})
-                        if not rec.get("trace_fields"):
-                            rec["trace_fields"] = default_workflow_tbr_gate(wf)["recorder"]["trace_fields"]
+                        complete_fields = _complete_trace_fields(rec.get("trace_fields"))
+                        if complete_fields != list(rec.get("trace_fields") or []):
+                            rec["trace_fields"] = complete_fields
                             changed_wf = True
                     if changed_wf:
                         save(wf_path, wf)
@@ -131,8 +140,9 @@ def main() -> None:
                             changed = True
                         else:
                             rec = card.setdefault("tbr_gate", {}).setdefault("recorder", {})
-                            if not rec.get("trace_fields"):
-                                rec["trace_fields"] = default_node_tbr_gate(wf, card)["recorder"]["trace_fields"]
+                            complete_fields = _complete_trace_fields(rec.get("trace_fields"))
+                            if complete_fields != list(rec.get("trace_fields") or []):
+                                rec["trace_fields"] = complete_fields
                                 changed = True
                         if changed:
                             save(nid_card, card)

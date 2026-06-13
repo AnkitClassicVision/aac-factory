@@ -262,7 +262,7 @@ def test_run_card_contract() -> None:
                                            "prompt_ref": "process/prompts/t-judge.md",
                                            "prompt_version": "1.0.0",
                                            "response_ref": "out",
-                                           "tool_call_refs": ["audit:no_tool_calls_executed"],
+                                           "tool_call_refs": ["audit:zero_tool_calls_executed"],
                                            "user_ref": "user:test",
                                            "recipient_ref": "recipient:test",
                                            "retention_class": "six_months",
@@ -277,7 +277,7 @@ def test_run_card_contract() -> None:
             "prompt_ref": "process/prompts/t-judge.md",
             "prompt_version": "1.0.0",
             "response_ref": "out",
-            "tool_call_refs": ["audit:no_tool_calls_executed"],
+            "tool_call_refs": ["audit:zero_tool_calls_executed"],
             "user_ref": "user:test",
             "recipient_ref": "recipient:test",
             "retention_class": "six_months",
@@ -318,6 +318,22 @@ def test_run_card_contract() -> None:
         assert runcard.validate_run_card(rc_no_policy_tbr) == []
         assert rc_no_policy_tbr["certification_eligible"] is False
         assert "tbr_contains_no_proof_sentinel" in rc_no_policy_tbr["certification_blockers"]
+        audit_no_proof_cases = {
+            "definition_refs": ["audit:no_definition"],
+            "semantic_source_refs": ["audit:no_source"],
+            "user_ref": "audit:no_user",
+        }
+        for field, bad_value in audit_no_proof_cases.items():
+            rc_audit_no_proof_tbr: dict = json.loads(json.dumps(rc_tbr))
+            rc_audit_no_proof_tbr["tbr"][field] = bad_value
+            assert runcard.validate_run_card(rc_audit_no_proof_tbr) == []
+            assert rc_audit_no_proof_tbr["certification_eligible"] is False
+            assert "tbr_contains_no_proof_sentinel" in rc_audit_no_proof_tbr["certification_blockers"]
+        rc_audit_no_policy_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_audit_no_policy_tbr["tbr"]["permission_decision"]["policy_ref"] = "audit:no_policy"
+        assert runcard.validate_run_card(rc_audit_no_policy_tbr) == []
+        assert rc_audit_no_policy_tbr["certification_eligible"] is False
+        assert "tbr_contains_no_proof_sentinel" in rc_audit_no_policy_tbr["certification_blockers"]
         rc_shared_service_tbr: dict = json.loads(json.dumps(rc_tbr))
         rc_shared_service_tbr["tbr"]["permission_decision"]["policy_ref"] = "policy:shared-service-account"
         assert runcard.validate_run_card(rc_shared_service_tbr) == []
@@ -385,6 +401,10 @@ def test_tbr_gate_fail_closed_contract() -> None:
     workflow_no_policy["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
     workflow_no_policy["tbr_gate"]["bouncer"]["policy_engine_ref"] = "no_policy"
     assert any("policy_engine_ref" in e for e in tbr_gate.validate_workflow_tbr(workflow_no_policy))
+    workflow_audit_no_policy = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_audit_no_policy["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    workflow_audit_no_policy["tbr_gate"]["bouncer"]["policy_engine_ref"] = "audit:no_policy"
+    assert any("policy_engine_ref" in e for e in tbr_gate.validate_workflow_tbr(workflow_audit_no_policy))
     workflow_bare_no_proof = json.loads(json.dumps(workflow_missing_cadence))
     workflow_bare_no_proof["tbr_gate"]["recorder"]["review_cadence"] = "no_review"
     workflow_bare_no_proof["tbr_gate"]["recorder"]["retention_class"] = "no_retention"
@@ -443,6 +463,14 @@ def test_tbr_gate_fail_closed_contract() -> None:
     node_no_policy = json.loads(json.dumps(node_valid_tbr))
     node_no_policy["tbr_gate"]["bouncer"]["effective_permission_path"] = "no_policy"
     assert any("effective_permission_path" in e for e in tbr_gate.validate_node_tbr(workflow_missing_cadence, node_no_policy))
+    node_audit_no_policy = json.loads(json.dumps(node_valid_tbr))
+    node_audit_no_policy["tbr_gate"]["bouncer"]["effective_permission_path"] = "audit:no_policy"
+    node_audit_no_policy["tbr_gate"]["translator"]["definition_refs"] = ["audit:no_definition"]
+    node_audit_no_policy["tbr_gate"]["translator"]["source_of_truth_refs"] = ["audit:no_source"]
+    audit_no_node_errors = tbr_gate.validate_node_tbr(workflow_missing_cadence, node_audit_no_policy)
+    assert any("effective_permission_path" in e for e in audit_no_node_errors)
+    assert any("definition_refs" in e for e in audit_no_node_errors)
+    assert any("source_of_truth_refs" in e for e in audit_no_node_errors)
     node_forbid_all_salary = json.loads(json.dumps(node_valid_tbr))
     node_forbid_all_salary["tbr_gate"]["bouncer"]["forbidden_resources"] = ["all salary records"]
     assert tbr_gate.validate_node_tbr(workflow_missing_cadence, node_forbid_all_salary) == []

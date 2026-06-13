@@ -63,8 +63,6 @@ def _contains_no_proof_sentinel(value: Any) -> bool:
              "no_source", "no source", "no_policy", "no policy", "no_truth", "no truth",
              "no_ref", "no ref", "no proof", "no-proof")
     for text in _iter_strings(value):
-        if text.startswith("audit:"):
-            continue
         if any(t in text for t in terms):
             return True
         if re.search(r'(^|[^a-z0-9])(no[_ -][a-z0-9][a-z0-9_-]*)', text):
