@@ -348,14 +348,18 @@ def test_tbr_gate_fail_closed_contract() -> None:
     bad_semantic_workflow["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
     bad_semantic_workflow["tbr_gate"]["bouncer"]["effective_permission_model"] = "shared_service_account"
     bad_semantic_workflow["tbr_gate"]["bouncer"]["task_scoped_tokens_required"] = False
-    bad_semantic_workflow["tbr_gate"]["translator"]["raw_query_policy"] = "raw SQL allowed"
+    bad_semantic_workflow["tbr_gate"]["translator"]["raw_query_policy"] = "raw SQL allowed with semantic gate"
+    bad_semantic_workflow["tbr_gate"]["translator"]["source_of_truth_refs"] = ["placeholder"]
     bad_workflow_errors = tbr_gate.validate_workflow_tbr(bad_semantic_workflow)
     assert any("effective_permission_model" in e for e in bad_workflow_errors)
     assert any("task_scoped_tokens_required" in e for e in bad_workflow_errors)
     assert any("raw_query_policy" in e for e in bad_workflow_errors)
+    assert any("source_of_truth_refs" in e and "concrete" in e for e in bad_workflow_errors)
 
     node_bad_semantics = json.loads(json.dumps(node_missing_forbidden))
     node_bad_semantics["tbr_gate"]["bouncer"]["forbidden_resources"] = ["hr:salary"]
+    node_bad_semantics["tbr_gate"]["bouncer"]["allowed_resources"] = ["crm:*"]
+    node_bad_semantics["tbr_gate"]["bouncer"]["task_scope"] = "any request forever"
     node_bad_semantics["tbr_gate"]["bouncer"]["human_identity_passthrough"] = "not_required"
     node_bad_semantics["tbr_gate"]["translator"]["raw_query_allowed"] = True
     node_bad_semantics["tbr_gate"]["recorder"]["permission_decision_logged"] = False
@@ -364,6 +368,8 @@ def test_tbr_gate_fail_closed_contract() -> None:
     assert any("human_identity_passthrough" in e for e in bad_node_errors)
     assert any("raw_query_allowed" in e for e in bad_node_errors)
     assert any("permission_decision_logged" in e for e in bad_node_errors)
+    assert any("allowed_resources" in e for e in bad_node_errors)
+    assert any("task_scope" in e for e in bad_node_errors)
     assert any("recorder.trace_fields" in e for e in bad_node_errors)
     print("[OK] TBR gate fail-closed contract test passed")
 

@@ -208,10 +208,25 @@ def _bad_permission_blob(value: Any) -> bool:
     blob = _text_blob(value)
     bad_terms = (
         "god-mode", "god mode", "shared_service", "shared service", "all-powerful",
-        "all_resources", "all resources", "all tables", "entire crm", "entire database",
-        "admin everywhere", "root access", "forever", "unbounded", "*:*",
+        "all_resources", "all resources", "any resources", "any resource", "any request",
+        "all tables", "entire crm", "entire database", "everything",
+        "admin everywhere", "root access", "forever", "unbounded", "*:*", ":*",
     )
     return any(t in blob for t in bad_terms)
+
+
+def _placeholder_blob(value: Any) -> bool:
+    blob = _text_blob(value)
+    placeholder_terms = (
+        "TODO", "placeholder", "tbd", "to be decided", "n/a", "not applicable",
+        "unknown", "fill me", "owner picks", "dummy", "sample", "example",
+        "\"none\"", "'none'", ": none", "= none", "...",
+    )
+    return any(t.lower() in blob for t in placeholder_terms)
+
+
+def _unsafe_tbr_value(value: Any) -> bool:
+    return _placeholder_blob(value) or _bad_permission_blob(value)
 
 
 def _raw_query_policy_blocks_raw_sql(policy: Any) -> bool:
@@ -222,7 +237,7 @@ def _raw_query_policy_blocks_raw_sql(policy: Any) -> bool:
         "raw_query_allowed" in text or "raw sql allowed" in text or
         "may query raw" in text or "can query raw" in text
     )
-    if explicit_allow and "without" not in text and "semantic" not in text and "policy" not in text:
+    if explicit_allow:
         return False
     return any(marker in text for marker in (
         "semantic_gate", "semantic gate", "semantic layer", "policy gate",
@@ -263,6 +278,14 @@ def _require_bounded(errors: list[str], prefix: str, gate: dict, dotted: str) ->
         errors.append(f"{prefix}: {dotted} appears unbounded or shared/god-mode")
 
 
+def _require_concrete(errors: list[str], prefix: str, gate: dict, dotted: str) -> None:
+    value = _value(gate, dotted)
+    if has_todo(value):
+        return
+    if _unsafe_tbr_value(value):
+        errors.append(f"{prefix}: {dotted} must be concrete, non-placeholder, and least-privilege scoped")
+
+
 def _validate_workflow_semantics(gate: dict) -> list[str]:
     prefix = "workflow tbr_gate"
     errors: list[str] = []
@@ -272,6 +295,12 @@ def _validate_workflow_semantics(gate: dict) -> list[str]:
     _require_true(errors, prefix, gate, "bouncer.task_scoped_tokens_required")
     _require_true(errors, prefix, gate, "recorder.run_card_required")
     errors.extend(_validate_trace_fields(prefix, _value(gate, "recorder.trace_fields")))
+    for dotted in (
+        "translator.canonical_definitions", "translator.source_of_truth_refs",
+        "bouncer.policy_engine_ref", "recorder.retention_class",
+        "recorder.tamper_evidence", "recorder.review_cadence",
+    ):
+        _require_concrete(errors, prefix, gate, dotted)
     _require_bounded(errors, prefix, gate, "bouncer.policy_engine_ref")
     return errors
 
@@ -292,6 +321,13 @@ def _validate_node_semantics(nid: str, gate: dict) -> list[str]:
     _require_true(errors, prefix, gate, "recorder.definition_refs_logged")
     _require_true(errors, prefix, gate, "recorder.source_refs_logged")
     errors.extend(_validate_trace_fields(prefix, _value(gate, "recorder.trace_fields")))
+    for dotted in (
+        "translator.definition_refs", "translator.source_of_truth_refs",
+        "bouncer.agent_identity", "bouncer.allowed_resources", "bouncer.effective_permission_path",
+        "bouncer.task_scope", "bouncer.forbidden_resources",
+        "recorder.retention_class", "recorder.tamper_evidence",
+    ):
+        _require_concrete(errors, prefix, gate, dotted)
     return errors
 
 
