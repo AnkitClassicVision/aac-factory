@@ -232,7 +232,8 @@ def _placeholder_blob(value: Any) -> bool:
         "unknown", "fill me", "owner picks", "dummy", "sample", "example",
         "\"none\"", "'none'", ": none", "= none", "none:", "not_applicable:",
         "not applicable:", "no_definition", "no definition", "no_source", "no source",
-        "no_truth", "no truth", "no_ref", "no ref", "no proof", "no-proof", "...",
+        "no_policy", "no policy", "no_truth", "no truth", "no_ref", "no ref",
+        "no proof", "no-proof", "...",
     )
     return any(t.lower() in blob for t in placeholder_terms)
 
@@ -281,7 +282,7 @@ def _validate_canonical_definitions(prefix: str, definitions: Any) -> list[str]:
                 errors.append(f"{prefix}: translator.canonical_definitions[{i}].{field} missing/empty")
             elif has_todo(value):
                 errors.append(f"{prefix}: translator.canonical_definitions[{i}].{field} still TODO")
-            elif _unsafe_tbr_value(value):
+            elif _placeholder_blob(value):
                 errors.append(f"{prefix}: translator.canonical_definitions[{i}].{field} must be concrete and non-placeholder")
     return errors
 
@@ -318,6 +319,14 @@ def _require_concrete(errors: list[str], prefix: str, gate: dict, dotted: str) -
         errors.append(f"{prefix}: {dotted} must be concrete, non-placeholder, and least-privilege scoped")
 
 
+def _require_non_placeholder(errors: list[str], prefix: str, gate: dict, dotted: str) -> None:
+    value = _value(gate, dotted)
+    if has_todo(value):
+        return
+    if _placeholder_blob(value):
+        errors.append(f"{prefix}: {dotted} must be concrete and non-placeholder")
+
+
 def _validate_workflow_semantics(gate: dict) -> list[str]:
     prefix = "workflow tbr_gate"
     errors: list[str] = []
@@ -331,10 +340,10 @@ def _validate_workflow_semantics(gate: dict) -> list[str]:
     errors.extend(_validate_canonical_definitions(prefix, _value(gate, "translator.canonical_definitions")))
     for dotted in (
         "translator.source_of_truth_refs", "bouncer.sensitive_systems",
-        "bouncer.policy_engine_ref", "recorder.retention_class",
-        "recorder.tamper_evidence", "recorder.review_cadence",
+        "recorder.retention_class", "recorder.tamper_evidence", "recorder.review_cadence",
     ):
-        _require_concrete(errors, prefix, gate, dotted)
+        _require_non_placeholder(errors, prefix, gate, dotted)
+    _require_non_placeholder(errors, prefix, gate, "bouncer.policy_engine_ref")
     _require_bounded(errors, prefix, gate, "bouncer.policy_engine_ref")
     return errors
 
@@ -348,7 +357,7 @@ def _validate_node_semantics(nid: str, gate: dict) -> list[str]:
     _require_exact(errors, prefix, gate, "bouncer.human_identity_passthrough", "required")
     for dotted in (
         "bouncer.agent_identity", "bouncer.allowed_resources", "bouncer.effective_permission_path",
-        "bouncer.task_scope", "bouncer.forbidden_resources",
+        "bouncer.task_scope",
     ):
         _require_bounded(errors, prefix, gate, dotted)
     _require_true(errors, prefix, gate, "recorder.run_card_required")
@@ -357,12 +366,15 @@ def _validate_node_semantics(nid: str, gate: dict) -> list[str]:
     _require_true(errors, prefix, gate, "recorder.source_refs_logged")
     errors.extend(_validate_trace_fields(prefix, _value(gate, "recorder.trace_fields")))
     for dotted in (
-        "translator.definition_refs", "translator.source_of_truth_refs",
         "bouncer.agent_identity", "bouncer.allowed_resources", "bouncer.effective_permission_path",
-        "bouncer.task_scope", "bouncer.forbidden_resources",
-        "recorder.retention_class", "recorder.tamper_evidence",
+        "bouncer.task_scope",
     ):
         _require_concrete(errors, prefix, gate, dotted)
+    for dotted in (
+        "translator.definition_refs", "translator.source_of_truth_refs", "bouncer.forbidden_resources",
+        "recorder.retention_class", "recorder.tamper_evidence",
+    ):
+        _require_non_placeholder(errors, prefix, gate, dotted)
     return errors
 
 

@@ -112,7 +112,10 @@ def _tbr_certification_blockers(tbr: dict[str, Any]) -> list[str]:
         blockers.append("tbr_trace_fields_incomplete")
     if "todo" in json.dumps(tbr, ensure_ascii=False).lower():
         blockers.append("tbr_contains_todo")
-    no_proof_fields = [tbr.get(f) for f in ("definition_refs", "semantic_source_refs", "retention_class", "tamper_evidence")]
+    no_proof_fields = [tbr.get(f) for f in (
+        "definition_refs", "semantic_source_refs", "prompt_ref", "prompt_version", "response_ref",
+        "tool_call_refs", "user_ref", "recipient_ref", "retention_class", "tamper_evidence",
+    )]
     no_proof_fields.append(pd.get("policy_ref"))
     if any(_contains_no_proof_sentinel(v) for v in no_proof_fields):
         blockers.append("tbr_contains_no_proof_sentinel")

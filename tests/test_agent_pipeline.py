@@ -262,7 +262,7 @@ def test_run_card_contract() -> None:
                                            "prompt_ref": "process/prompts/t-judge.md",
                                            "prompt_version": "1.0.0",
                                            "response_ref": "out",
-                                           "tool_call_refs": ["none:no_tool_calls"],
+                                           "tool_call_refs": ["audit:no_tool_calls_executed"],
                                            "user_ref": "user:test",
                                            "recipient_ref": "recipient:test",
                                            "retention_class": "six_months",
@@ -277,7 +277,7 @@ def test_run_card_contract() -> None:
             "prompt_ref": "process/prompts/t-judge.md",
             "prompt_version": "1.0.0",
             "response_ref": "out",
-            "tool_call_refs": ["none:no_tool_calls"],
+            "tool_call_refs": ["audit:no_tool_calls_executed"],
             "user_ref": "user:test",
             "recipient_ref": "recipient:test",
             "retention_class": "six_months",
@@ -295,11 +295,29 @@ def test_run_card_contract() -> None:
         assert rc_placeholder_tbr["certification_eligible"] is False
         assert "tbr_contains_placeholder" in rc_placeholder_tbr["certification_blockers"]
         assert "tbr_permission_scope_unbounded" in rc_placeholder_tbr["certification_blockers"]
-        rc_no_proof_tbr: dict = json.loads(json.dumps(rc_tbr))
-        rc_no_proof_tbr["tbr"]["definition_refs"] = ["none:no_definition"]
-        assert runcard.validate_run_card(rc_no_proof_tbr) == []
-        assert rc_no_proof_tbr["certification_eligible"] is False
-        assert "tbr_contains_no_proof_sentinel" in rc_no_proof_tbr["certification_blockers"]
+        no_proof_cases = {
+            "definition_refs": ["none:no_definition"],
+            "semantic_source_refs": ["not_applicable:no_source"],
+            "prompt_ref": "none:no_ref",
+            "prompt_version": "not_applicable:no_prompt_version",
+            "response_ref": "no_ref",
+            "tool_call_refs": ["not_applicable:no_tool"],
+            "user_ref": "no_ref",
+            "recipient_ref": "none:no_recipient",
+            "retention_class": "none:no_retention",
+            "tamper_evidence": "no proof",
+        }
+        for field, bad_value in no_proof_cases.items():
+            rc_no_proof_tbr: dict = json.loads(json.dumps(rc_tbr))
+            rc_no_proof_tbr["tbr"][field] = bad_value
+            assert runcard.validate_run_card(rc_no_proof_tbr) == []
+            assert rc_no_proof_tbr["certification_eligible"] is False
+            assert "tbr_contains_no_proof_sentinel" in rc_no_proof_tbr["certification_blockers"]
+        rc_no_policy_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_no_policy_tbr["tbr"]["permission_decision"]["policy_ref"] = "no_policy"
+        assert runcard.validate_run_card(rc_no_policy_tbr) == []
+        assert rc_no_policy_tbr["certification_eligible"] is False
+        assert "tbr_contains_no_proof_sentinel" in rc_no_policy_tbr["certification_blockers"]
         rc_shared_service_tbr: dict = json.loads(json.dumps(rc_tbr))
         rc_shared_service_tbr["tbr"]["permission_decision"]["policy_ref"] = "policy:shared-service-account"
         assert runcard.validate_run_card(rc_shared_service_tbr) == []
@@ -357,6 +375,13 @@ def test_tbr_gate_fail_closed_contract() -> None:
     bad_definition_errors = tbr_gate.validate_workflow_tbr(workflow_bad_canonical_definition)
     assert any("canonical_definitions[0].definition_ref" in e for e in bad_definition_errors)
     assert any("canonical_definitions[0].source_of_truth_ref" in e for e in bad_definition_errors)
+    workflow_no_policy = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_no_policy["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    workflow_no_policy["tbr_gate"]["bouncer"]["policy_engine_ref"] = "no_policy"
+    assert any("policy_engine_ref" in e for e in tbr_gate.validate_workflow_tbr(workflow_no_policy))
+    workflow_review_every = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_review_every["tbr_gate"]["recorder"]["review_cadence"] = "review every 30 days"
+    assert tbr_gate.validate_workflow_tbr(workflow_review_every) == []
 
     workflow_required_false = {"max_lane": "draft", "tbr_gate": {"required": False}}
     node_required_false = {"node_id": "n", "runtime_mode": "C", "tbr_gate": {"required": False}}
@@ -396,6 +421,15 @@ def test_tbr_gate_fail_closed_contract() -> None:
         },
     }
     assert any("forbidden_resources" in e for e in tbr_gate.validate_node_tbr(workflow_missing_cadence, node_missing_forbidden))
+    node_valid_tbr = json.loads(json.dumps(node_missing_forbidden))
+    node_valid_tbr["tbr_gate"]["bouncer"]["forbidden_resources"] = ["hr:salary"]
+    assert tbr_gate.validate_node_tbr(workflow_missing_cadence, node_valid_tbr) == []
+    node_no_policy = json.loads(json.dumps(node_valid_tbr))
+    node_no_policy["tbr_gate"]["bouncer"]["effective_permission_path"] = "no_policy"
+    assert any("effective_permission_path" in e for e in tbr_gate.validate_node_tbr(workflow_missing_cadence, node_no_policy))
+    node_forbid_all_salary = json.loads(json.dumps(node_valid_tbr))
+    node_forbid_all_salary["tbr_gate"]["bouncer"]["forbidden_resources"] = ["all salary records"]
+    assert tbr_gate.validate_node_tbr(workflow_missing_cadence, node_forbid_all_salary) == []
 
     bad_semantic_workflow = json.loads(json.dumps(workflow_missing_cadence))
     bad_semantic_workflow["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"

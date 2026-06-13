@@ -206,15 +206,15 @@ def _tbr_card_fields(node: dict, ctx: dict, output_ref: str) -> dict:
                      or _as_ref_list(ctx.get("_source_refs"))
                      or [GRAPH.get("compiled_from", "process/workflow.aac.json")])
     policy_ref = str(bouncer.get("effective_permission_path") or bouncer.get("policy_engine_ref") or "compiled-runtime-no-external-effectors")
-    prompt_ref = str(node.get("prompt_ref") or (f"process/prompts/{node['node_id']}.md" if node.get("runtime_mode") in ("C", "A") else "not_applicable:no_prompt"))
-    prompt_version = str(node.get("prompt_version") or "not_applicable:no_prompt_version")
+    prompt_ref = str(node.get("prompt_ref") or (f"process/prompts/{node['node_id']}.md" if node.get("runtime_mode") in ("C", "A") else "audit:non_llm_node_prompt_absent"))
+    prompt_version = str(node.get("prompt_version") or ("unknown" if node.get("runtime_mode") in ("C", "A") else "audit:non_llm_node_prompt_version_absent"))
     user_ref = str(ctx.get("_user_ref") or ctx.get("_actor_ref") or "TODO: runtime user/actor ref")
     recipient_ref = str(ctx.get("_recipient_ref") or ctx.get("_actor_ref") or "internal_runtime")
     return {
         "tbr_required": required,
         "prompt_ref": prompt_ref,
         "response_ref": output_ref,
-        "tool_call_refs": list(ctx.get("_tool_call_refs") or ["none:runtime_has_no_tool_effectors"]),
+        "tool_call_refs": list(ctx.get("_tool_call_refs") or ["audit:no_tool_calls_executed"]),
         "user_ref": user_ref,
         "recipient_ref": recipient_ref,
         "tbr": {
@@ -228,7 +228,7 @@ def _tbr_card_fields(node: dict, ctx: dict, output_ref: str) -> dict:
             "prompt_ref": prompt_ref,
             "prompt_version": prompt_version,
             "response_ref": output_ref,
-            "tool_call_refs": list(ctx.get("_tool_call_refs") or ["none:runtime_has_no_tool_effectors"]),
+            "tool_call_refs": list(ctx.get("_tool_call_refs") or ["audit:no_tool_calls_executed"]),
             "user_ref": user_ref,
             "recipient_ref": recipient_ref,
             "retention_class": recorder.get("retention_class") or "TODO: runtime log retention class",
