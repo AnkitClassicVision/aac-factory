@@ -90,6 +90,25 @@ def test_improvement_loop() -> None:
         judge = json.loads(judge_path.read_text(encoding="utf-8"))
         assert judge["objective"]["primary"]["metric"] == "golden_accuracy", "heal must re-inject objective"
 
+        # QA flags partial Recorder trace contracts; heal completes missing fields rather than only empty lists
+        wf_path = pkg / "process" / "workflow.aac.json"
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        workflow_trace_fields = list(wf["tbr_gate"]["recorder"]["trace_fields"])
+        wf["tbr_gate"]["recorder"]["trace_fields"] = workflow_trace_fields[:3]
+        wf_path.write_text(json.dumps(wf, indent=2), encoding="utf-8")
+        judge = json.loads(judge_path.read_text(encoding="utf-8"))
+        node_trace_fields = list(judge["tbr_gate"]["recorder"]["trace_fields"])
+        judge["tbr_gate"]["recorder"]["trace_fields"] = node_trace_fields[:3]
+        judge_path.write_text(json.dumps(judge, indent=2), encoding="utf-8")
+        r = subprocess.run([PY, "scripts/qa_agent_package.py", str(pkg)], cwd=work,
+                           capture_output=True, text=True)
+        assert "tbr_recorder_trace_contract" in r.stdout
+        run([PY, "scripts/heal_agent_package.py", str(pkg)], work)
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        judge = json.loads(judge_path.read_text(encoding="utf-8"))
+        assert wf["tbr_gate"]["recorder"]["trace_fields"] == workflow_trace_fields
+        assert judge["tbr_gate"]["recorder"]["trace_fields"] == node_trace_fields
+
     print("[OK] improvement loop test passed")
 
 

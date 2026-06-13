@@ -13,7 +13,8 @@ flowchart LR
   B ==> C[ATLAS: beliefs + evidence + proof slots]
   C ==> D[Concept map: the why, auto-built]
   D ==> E[Cards: one contract per node, D/C/A/H]
-  E ==> F[Validator: ladder R0-R4]
+  E ==> T[TBR gate: Translator + Bouncer + Recorder]
+  T ==> F[Validator: ladder R0-R4]
   F ==> G[QA: blind auditor + leak gate]
   G --> H[Self-heal derivable defects]
   H --> G
@@ -115,6 +116,16 @@ cards via `scripts/runcard.py`: gate outcomes, confidence, requested model, actu
 verified by the adapter, prompt version, honest usage (`unknown` when unavailable, never fake zero),
 refusals with reasons, `external_actions_taken`, escalations auto-queued to
 `process/run-cards/_review_queue/`. Run cards are the promotion evidence and the improver's food.
+
+## TBR governance gate
+
+AAC Factory now scaffolds a **Translator / Bouncer / Recorder** proof block on workflow and node
+cards. This is the enterprise trust layer: canonical definitions and source-of-truth refs,
+user-via-agent permission paths, and recorder trace fields that prove which definition/source/policy
+produced each answer. Missing TBR blocks are QA blockers; TODO TBR fields keep the package
+non-certifying until source owners fill the definitions, access policies, retention class, and
+tamper-evidence. Compiled runtimes carry TBR proof into run cards and mark runs non-certifying when
+that proof is incomplete. See `docs/tbr-governance-gate.md`.
 
 ## Versioning
 

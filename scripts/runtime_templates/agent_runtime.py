@@ -181,6 +181,71 @@ def _adapter_card_fields(adapter: dict | None) -> dict:
     }
 
 
+def _as_ref_list(value) -> list[str]:
+    if value is None:
+        return []
+    raw = value if isinstance(value, list) else [value]
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, dict):
+            out.append(item.get("definition_ref") or item.get("source_of_truth_ref") or json.dumps(item, sort_keys=True))
+        elif item not in (None, "", []):
+            out.append(str(item))
+    return out
+
+
+def _tbr_card_fields(node: dict, ctx: dict, output_ref: str) -> dict:
+    gate = node.get("tbr_gate") or {}
+    required = bool(gate.get("required", False))
+    translator = gate.get("translator") or {}
+    bouncer = gate.get("bouncer") or {}
+    recorder = gate.get("recorder") or {}
+    definition_refs = (_as_ref_list(translator.get("definition_refs"))
+                       or _as_ref_list(translator.get("canonical_definitions")))
+    explicit_semantic_refs = _as_ref_list(translator.get("source_of_truth_refs"))
+    semantic_refs = (explicit_semantic_refs
+                     or (["audit:no_source"] if required else (_as_ref_list(ctx.get("_source_refs"))
+                                                              or [GRAPH.get("compiled_from", "process/workflow.aac.json")]))
+                    )
+    policy_ref = str(bouncer.get("effective_permission_path") or bouncer.get("policy_engine_ref") or "compiled-runtime-no-external-effectors")
+    prompt_ref = str(node.get("prompt_ref") or (f"process/prompts/{node['node_id']}.md" if node.get("runtime_mode") in ("C", "A") else "audit:non_llm_node_prompt_absent"))
+    prompt_version = str(node.get("prompt_version") or ("unknown" if node.get("runtime_mode") in ("C", "A") else "audit:non_llm_node_prompt_version_absent"))
+    user_ref = str(ctx.get("_user_ref") or ctx.get("_actor_ref") or "TODO: runtime user/actor ref")
+    recipient_ref = str(ctx.get("_recipient_ref") or ctx.get("_actor_ref") or "internal_runtime")
+    return {
+        "tbr_required": required,
+        "prompt_ref": prompt_ref,
+        "response_ref": output_ref,
+        "tool_call_refs": list(ctx.get("_tool_call_refs") or ["audit:zero_tool_calls_executed"]),
+        "user_ref": user_ref,
+        "recipient_ref": recipient_ref,
+        "tbr": {
+            "definition_refs": definition_refs,
+            "permission_decision": {
+                "allowed": True,
+                "policy_ref": policy_ref,
+                "reason": "runtime has no external effectors; node access is constrained to supplied context, handlers, and card policy refs",
+            },
+            "semantic_source_refs": semantic_refs,
+            "prompt_ref": prompt_ref,
+            "prompt_version": prompt_version,
+            "response_ref": output_ref,
+            "tool_call_refs": list(ctx.get("_tool_call_refs") or ["audit:zero_tool_calls_executed"]),
+            "user_ref": user_ref,
+            "recipient_ref": recipient_ref,
+            "retention_class": recorder.get("retention_class") or "TODO: runtime log retention class",
+            "tamper_evidence": recorder.get("tamper_evidence") or "TODO: runtime tamper-evidence mechanism",
+            "audit_notes": "TBR proof emitted by AAC Factory runtime; live API/resource enforcement must still happen at the source/proxy boundary.",
+            "trace_fields": recorder.get("trace_fields") or [
+                "run_id", "workflow", "node_id", "runtime_mode", "input_ref", "output_ref",
+                "prompt_ref", "prompt_version", "response_ref", "tool_call_refs", "user_ref", "recipient_ref",
+                "source_refs", "definition_refs", "permission_decision", "gate_outcomes", "refuse",
+                "external_actions_taken", "retention_class", "tamper_evidence",
+            ],
+        },
+    }
+
+
 def run_graph(trigger_ctx: dict | None = None, *, parent_run_id: str | None = None,
               candidate_ref: str | None = None) -> dict:
     run_id = f"run-{uuid.uuid4().hex[:10]}"
@@ -196,13 +261,14 @@ def run_graph(trigger_ctx: dict | None = None, *, parent_run_id: str | None = No
         out, gates, adapter = execute_node(node, ctx, report)
         nxt = route(node, out)
         blockers = list(out.get("_certification_blockers") or [])
+        output_ref = f"-> {nxt}"
         rc = runcard.new_run_card(
             run_id=f"{run_id}-{visited:02d}", workflow=GRAPH["workflow_id"], node_id=current,
             runtime_mode=node["runtime_mode"], actual_lane=GRAPH["lane"],
             run_kind="batch_child" if parent_run_id else "node",
             parent_run_id=parent_run_id, candidate_ref=candidate_ref,
             ts_start=t0, ts_end=now(),
-            input_ref=ctx.get("_ref", "ctx"), output_ref=f"-> {nxt}",
+            input_ref=ctx.get("_ref", "ctx"), output_ref=output_ref,
             gate_outcomes=gates, source_refs=[GRAPH["compiled_from"]],
             confidence=out.get("confidence") if node["runtime_mode"] in ("C", "A") else None,
             model=node.get("model") if node["runtime_mode"] in ("C", "A") else None,
@@ -214,6 +280,7 @@ def run_graph(trigger_ctx: dict | None = None, *, parent_run_id: str | None = No
                                or (f"routed to {nxt} by edge condition" if nxt in ("refuse_sink", "hard_refuse_sink") else ""))},
             escalation={"escalated": bool(out.get("_below_floor")),
                         "reason": "confidence_below_floor" if out.get("_below_floor") else ""},
+            **_tbr_card_fields(node, ctx, output_ref),
             **_adapter_card_fields(adapter),
         )
         runcard.write_run_card(PKG, rc)
@@ -264,7 +331,7 @@ def run_batch(candidates: list[Any], base_ctx: dict) -> dict:
         input_ref=base_ctx.get("_ref", "batch"), output_ref="process/run-cards/_runs/" + batch_id + ".json",
         gate_outcomes={"input": "pass", "output": "pass", "cross_check": "not_run", "action": "pass (no effectors exist)"},
         refuse={"refused": False, "hard": False, "reason": ""}, source_refs=[GRAPH["compiled_from"]],
-        external_actions_taken=0,
+        external_actions_taken=0, tbr_required=False,
     )
     runcard.write_run_card(PKG, rc)
     return parent

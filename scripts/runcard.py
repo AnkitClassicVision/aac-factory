@@ -10,6 +10,7 @@ makes the run non-certifying without blocking shadow/debug execution.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,127 @@ RUN_CARD_REQUIRED = [
 ]
 GATE_KEYS = ("input", "output", "cross_check", "action")
 ESCALATION_REASONS = ("hard_refuse", "confidence_below_floor", "gate_failure", "qa_block", "drift_alarm")
+TBR_REQUIRED_MODES = {"C", "A", "D", "H"}
 UNKNOWN_USAGE = {"tokens_in": "unknown", "tokens_out": "unknown", "cost_usd": "unknown",
                  "usage_source": "unknown", "actual_usage_available": False}
+TBR_TRACE_FIELDS = [
+    "run_id", "workflow", "node_id", "runtime_mode", "input_ref", "output_ref",
+    "prompt_ref", "prompt_version", "response_ref", "tool_call_refs", "user_ref", "recipient_ref",
+    "source_refs", "definition_refs", "permission_decision", "gate_outcomes", "refuse",
+    "external_actions_taken", "retention_class", "tamper_evidence",
+]
+
+
+def _text_blob(value: Any) -> str:
+    try:
+        return json.dumps(value, sort_keys=True, ensure_ascii=False).lower()
+    except TypeError:
+        return str(value).lower()
+
+
+def _iter_strings(value: Any):
+    if isinstance(value, dict):
+        for v in value.values():
+            yield from _iter_strings(v)
+    elif isinstance(value, (list, tuple, set)):
+        for v in value:
+            yield from _iter_strings(v)
+    elif value is not None:
+        yield str(value).strip().lower()
+
+
+def _contains_placeholder(value: Any) -> bool:
+    blob = _text_blob(value)
+    terms = ("todo", "placeholder", "tbd", "to be decided", "n/a", "not applicable",
+             "unknown", "fill me", "dummy", "sample", "example", "\"none\"", "'none'",
+             ": none", "= none", "...")
+    if any(t in blob for t in terms):
+        return True
+    return any(re.search(r'(^|[^a-z0-9_-])none([^a-z0-9_-]|$)', text)
+               for text in _iter_strings(value))
+
+
+def _contains_no_proof_sentinel(value: Any) -> bool:
+    terms = ("none:", "not_applicable:", "not applicable:", "no_definition", "no definition",
+             "no_source", "no source", "no_policy", "no policy", "no_truth", "no truth",
+             "no_ref", "no ref", "no proof", "no-proof")
+    for text in _iter_strings(value):
+        if any(t in text for t in terms):
+            return True
+        if re.search(r'(^|[^a-z0-9])(no[_ -][a-z0-9][a-z0-9_-]*)', text):
+            return True
+    return False
+
+
+def _bad_permission_blob(value: Any) -> bool:
+    blob = _text_blob(value)
+    terms = ("god-mode", "god mode", "shared_service", "shared service", "shared-service",
+             "shared_service_account", "shared service account", "shared-service-account", "all_resources",
+             "all resources", "any resources", "any resource", "any request", "all tables",
+             "entire crm", "entire database", "everything", "root access", "forever",
+             "unbounded", "*:*", ":*", "/*", ".*")
+    if any(t in blob for t in terms):
+        return True
+    if re.search(r'(?<![a-z0-9_-])\*(?![a-z0-9_-])', blob):
+        return True
+    if re.search(r'(?<![a-z0-9_-])(all|any|every)(?![a-z0-9_-])', blob):
+        return True
+    return False
+
+
+def _normalize_tbr(tbr: dict[str, Any] | None) -> dict[str, Any]:
+    base = {
+        "definition_refs": [],
+        "permission_decision": {"allowed": None, "policy_ref": "", "reason": ""},
+        "semantic_source_refs": [],
+        "prompt_ref": "",
+        "prompt_version": "",
+        "response_ref": "",
+        "tool_call_refs": [],
+        "user_ref": "",
+        "recipient_ref": "",
+        "retention_class": "",
+        "tamper_evidence": "",
+        "audit_notes": "",
+        "trace_fields": list(TBR_TRACE_FIELDS),
+    }
+    if isinstance(tbr, dict):
+        for k, v in tbr.items():
+            if k == "permission_decision" and isinstance(v, dict):
+                merged = dict(base["permission_decision"])
+                merged.update(v)
+                base[k] = merged
+            else:
+                base[k] = v
+    return base
+
+
+def _tbr_certification_blockers(tbr: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    for f in ("definition_refs", "semantic_source_refs", "prompt_ref", "prompt_version",
+              "response_ref", "tool_call_refs", "user_ref", "recipient_ref",
+              "retention_class", "tamper_evidence"):
+        if not tbr.get(f):
+            blockers.append(f"tbr_{f}_missing")
+    pd = tbr.get("permission_decision") or {}
+    if pd.get("allowed") not in (True, False) or not pd.get("policy_ref"):
+        blockers.append("tbr_permission_decision_incomplete")
+    if set(TBR_TRACE_FIELDS) - set(tbr.get("trace_fields") or []):
+        blockers.append("tbr_trace_fields_incomplete")
+    if "todo" in json.dumps(tbr, ensure_ascii=False).lower():
+        blockers.append("tbr_contains_todo")
+    no_proof_fields = [tbr.get(f) for f in (
+        "definition_refs", "semantic_source_refs", "prompt_ref", "prompt_version", "response_ref",
+        "tool_call_refs", "user_ref", "recipient_ref", "retention_class", "tamper_evidence",
+    )]
+    no_proof_fields.append(pd.get("policy_ref"))
+    if any(_contains_no_proof_sentinel(v) for v in no_proof_fields):
+        blockers.append("tbr_contains_no_proof_sentinel")
+    if _contains_placeholder(tbr):
+        blockers.append("tbr_contains_placeholder")
+    if _bad_permission_blob([pd.get("policy_ref"), pd.get("reason")]):
+        blockers.append("tbr_permission_scope_unbounded")
+    return blockers
 
 
 def _usage(fields: dict[str, Any]) -> dict[str, Any]:
@@ -43,6 +163,10 @@ def _usage(fields: dict[str, Any]) -> dict[str, Any]:
 
 def new_run_card(**fields) -> dict:
     fields = dict(fields)
+    tbr_required_raw = fields.pop("tbr_required", None)
+    runtime_mode = str(fields.get("runtime_mode") or "")
+    tbr_required = (runtime_mode in TBR_REQUIRED_MODES) if tbr_required_raw is None else bool(tbr_required_raw)
+    tbr = _normalize_tbr(fields.pop("tbr", None))
     model = fields.get("model")
     requested_model = fields.get("requested_model", model)
     usage = _usage(fields)
@@ -64,6 +188,11 @@ def new_run_card(**fields) -> dict:
         "executor": fields.get("executor", "unknown"),
         "adapter_version": fields.get("adapter_version", "unknown"),
         "prompt_version": None,
+        "prompt_ref": fields.get("prompt_ref") or tbr.get("prompt_ref") or "",
+        "response_ref": fields.get("response_ref") or tbr.get("response_ref") or "",
+        "tool_call_refs": fields.get("tool_call_refs") or tbr.get("tool_call_refs") or [],
+        "user_ref": fields.get("user_ref") or tbr.get("user_ref") or "",
+        "recipient_ref": fields.get("recipient_ref") or tbr.get("recipient_ref") or "",
         "usage": usage,
         "cost": {"tokens_in": usage.get("tokens_in", "unknown"),
                  "tokens_out": usage.get("tokens_out", "unknown"),
@@ -73,6 +202,8 @@ def new_run_card(**fields) -> dict:
         "refuse": {"refused": False, "hard": False, "reason": ""},
         "external_actions_taken": 0,
         "source_refs": [],
+        "tbr_required": tbr_required,
+        "tbr": tbr,
         "escalation": {"escalated": False, "reason": ""},
         "qa": {"sampled": False, "verdict": None},
     }
@@ -87,10 +218,29 @@ def new_run_card(**fields) -> dict:
     fields.pop("certification_eligible", None)
     fields.pop("certification_blockers", None)
     card.update(fields)
+    if card.get("tbr_required"):
+        for key in ("prompt_ref", "response_ref", "tool_call_refs", "user_ref", "recipient_ref"):
+            if not card.get(key) and tbr.get(key):
+                card[key] = tbr[key]
+            if not tbr.get(key) and card.get(key):
+                tbr[key] = card[key]
+        if not tbr.get("prompt_version") and card.get("prompt_version"):
+            tbr["prompt_version"] = card["prompt_version"]
+    if card.get("runtime_mode") in TBR_REQUIRED_MODES and not card.get("tbr_required"):
+        blockers = set(card.get("certification_blockers") or [])
+        blockers.add("tbr_not_required_non_certifying")
+        card["certification_blockers"] = sorted(blockers)
+        card["certification_eligible"] = False
     if card["runtime_mode"] in {"C", "A"}:
         blockers = set(card.get("certification_blockers") or [])
         if not card.get("model_verified"):
             blockers.add("model_identity_unverified")
+        if blockers:
+            card["certification_blockers"] = sorted(blockers)
+            card["certification_eligible"] = False
+    if card.get("tbr_required"):
+        blockers = set(card.get("certification_blockers") or [])
+        blockers.update(_tbr_certification_blockers(card.get("tbr") or {}))
         if blockers:
             card["certification_blockers"] = sorted(blockers)
             card["certification_eligible"] = False
@@ -119,6 +269,28 @@ def validate_run_card(card: dict) -> list[str]:
     ext = card.get("external_actions_taken")
     if not isinstance(ext, int) or ext < 0:
         errors.append("external_actions_taken must be an integer >= 0")
+    if card.get("runtime_mode") in TBR_REQUIRED_MODES and not card.get("tbr_required"):
+        blockers = set(card.get("certification_blockers") or [])
+        if card.get("certification_eligible") is not False or "tbr_not_required_non_certifying" not in blockers:
+            errors.append("certifying run card requires TBR proof or explicit non-certifying blocker")
+    if card.get("tbr_required"):
+        tbr = _normalize_tbr(card.get("tbr") or {})
+        card["tbr"] = tbr
+        for f in ("definition_refs", "permission_decision", "semantic_source_refs", "trace_fields",
+                  "prompt_ref", "prompt_version", "response_ref", "tool_call_refs",
+                  "user_ref", "recipient_ref", "retention_class", "tamper_evidence"):
+            if f not in tbr or tbr[f] in (None, "", [], {}):
+                errors.append(f"TBR run proof requires {f}")
+        pd = tbr.get("permission_decision") or {}
+        if pd.get("allowed") not in (True, False):
+            errors.append("TBR permission_decision.allowed must be true/false")
+        if not pd.get("policy_ref"):
+            errors.append("TBR permission_decision.policy_ref required")
+        blockers = set(card.get("certification_blockers") or [])
+        blockers.update(_tbr_certification_blockers(tbr))
+        if blockers:
+            card["certification_blockers"] = sorted(blockers)
+            card["certification_eligible"] = False
     esc = card.get("escalation") or {}
     if esc.get("escalated") and esc.get("reason") not in ESCALATION_REASONS:
         errors.append(f"escalation reason must be one of {ESCALATION_REASONS}")

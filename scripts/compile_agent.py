@@ -209,7 +209,7 @@ def main() -> None:
     lane = "internal_artifact_only" if shadow else str(wf.get("max_lane", "recommend"))
 
     node_ids = [n["node_id"] if isinstance(n, dict) else n for n in wf.get("nodes", [])]
-    cards = {nid: load(pkg / "process" / "nodes" / f"{nid}.aac.json") for nid in node_ids}
+    cards = {nid: load(pkg / "process" / "nodes" / f"{nid}.aac.json") or {} for nid in node_ids}
     missing = [nid for nid, c in cards.items() if not c]
     if missing:
         raise SystemExit(f"REFUSED: node cards missing: {missing}")
@@ -261,10 +261,12 @@ def main() -> None:
             "node_id": nid, "module": module, "runtime_mode": rm,
             "execution": enrich_execution(c.get("execution", {}), str(c.get("model") or ""), cfg),
             "model": c.get("model"),
+            "prompt_ref": c.get("prompt_ref"),
             "prompt_version": c.get("prompt_version"),
             "confidence_floor": float(floor) if isinstance(floor, (int, float)) else 0.6,
             "bounded_actions": c.get("bounded_actions") or [],
             "hard_refuse": c.get("hard_refuse", []),
+            "tbr_gate": c.get("tbr_gate", {}),
             "output_gates": output_gates,
             "edges": node_edges,
             "below_floor_route": human_targets[0],
@@ -342,6 +344,7 @@ def main() -> None:
         f"- certifying_gates: {certifying_gates or 'none'}",
         f"- blocking_unenforced_gates: {blocking_unenforced_gates or 'none'}",
         f"- advisory_design_notes: {len(advisory_design_notes)}",
+        "- tbr_gate_compiled: true (Translator/Bouncer/Recorder proof fields carried into nodes.json + run cards)",
         "- model_verification_required: true for C/A certification",
         "- usage_required_for_cost_claims: true",
         "",

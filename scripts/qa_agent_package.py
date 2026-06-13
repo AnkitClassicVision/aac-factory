@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 from validate_agent_package import NODE_REQUIRED, C_NODE_REQUIRED, WORKFLOW_REQUIRED, SINK_IDS
+from tbr_gate import TBR_TRACE_FIELDS, validate_node_tbr, validate_workflow_tbr
 
 WEIGHTS = {"critical": 3, "major": 2, "minor": 1}
 THRESHOLD = 0.75
@@ -122,7 +123,7 @@ def main() -> None:
         f"unmapped={sorted(atlas_ids - mapped)[:6]}")
 
     # ---- process layer ----
-    wf = load(pkg / "process" / "workflow.aac.json", {})
+    wf = load(pkg / "process" / "workflow.aac.json", {}) or {}
     node_ids = [n["node_id"] if isinstance(n, dict) else n for n in wf.get("nodes", [])]
     missing_wf = [f for f in WORKFLOW_REQUIRED if not wf.get(f)]
     add("workflow_required_fields", "critical", "Workflow card carries every required AAC field?",
@@ -138,6 +139,38 @@ def main() -> None:
     no_card = [nid for nid, c in cards.items() if not c]
     add("cards_exist_per_node", "critical", "One AAC card per node?",
         "PASS" if node_ids and not no_card else "FAIL", f"missing={no_card}")
+
+    wf_tbr = validate_workflow_tbr(wf)
+    node_tbr = []
+    for c in cards.values():
+        if c:
+            node_tbr.extend(validate_node_tbr(wf, c))
+    all_tbr = wf_tbr + node_tbr
+    missing_tbr = [b for b in all_tbr if "missing" in b or "empty" in b]
+    todo_tbr = [b for b in all_tbr if "TODO" in b]
+    workflow_trace_fields = (((wf.get("tbr_gate") or {}).get("recorder") or {}).get("trace_fields") or [])
+    node_trace_incomplete = []
+    for nid, c in cards.items():
+        if not c:
+            continue
+        node_trace_fields = (((c.get("tbr_gate") or {}).get("recorder") or {}).get("trace_fields") or [])
+        if set(TBR_TRACE_FIELDS) - set(node_trace_fields):
+            node_trace_incomplete.append(nid)
+    trace_ok = (set(TBR_TRACE_FIELDS) <= set(workflow_trace_fields)) and not node_trace_incomplete
+    add("tbr_gate_present", "critical",
+        "Translator/Bouncer/Recorder gate exists on workflow and node cards?",
+        "PASS" if not missing_tbr else "FAIL", f"missing={missing_tbr[:6]}",
+        auto_fixable=bool(missing_tbr), fix_class="derivable_fields")
+    add("tbr_recorder_trace_contract", "critical",
+        "Recorder declares the portable trace fields needed to prove what happened?",
+        "PASS" if trace_ok else "FAIL",
+        f"workflow_trace_fields={workflow_trace_fields} node_trace_incomplete={node_trace_incomplete[:6]}",
+        auto_fixable=not trace_ok, fix_class="derivable_fields")
+    add("tbr_gate_resolved", "major",
+        "Translator definitions, bouncer permission path, and recorder policy are filled beyond TODO before certification?",
+        "PASS" if not all_tbr else "FAIL",
+        f"todo={todo_tbr[:6]} missing={missing_tbr[:3]}",
+        auto_fixable=False, fix_class="")
 
     incomplete, telemetry_bad, sup_bad, h_unjustified, obj_bad, exec_bad = [], [], [], [], [], []
     ai_nodes = []
