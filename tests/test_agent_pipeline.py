@@ -275,6 +275,17 @@ def test_run_card_contract() -> None:
         assert runcard.validate_run_card(rc_todo_tbr) == []
         assert rc_todo_tbr["certification_eligible"] is False
         assert "tbr_contains_todo" in rc_todo_tbr["certification_blockers"]
+        rc_placeholder_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_placeholder_tbr["tbr"]["definition_refs"] = ["placeholder"]
+        rc_placeholder_tbr["tbr"]["permission_decision"]["policy_ref"] = "policy:any request"
+        assert runcard.validate_run_card(rc_placeholder_tbr) == []
+        assert rc_placeholder_tbr["certification_eligible"] is False
+        assert "tbr_contains_placeholder" in rc_placeholder_tbr["certification_blockers"]
+        assert "tbr_permission_scope_unbounded" in rc_placeholder_tbr["certification_blockers"]
+        rc_string_allowed: dict = json.loads(json.dumps(rc_tbr))
+        rc_string_allowed["tbr"]["permission_decision"]["allowed"] = "true"
+        string_allowed_errors = runcard.validate_run_card(rc_string_allowed)
+        assert any("allowed must be true/false" in e for e in string_allowed_errors)
         assert rc["usage"]["tokens_in"] == "unknown" and rc["cost"]["tokens_in"] == "unknown"
         runcard.write_run_card(pkg, rc)
         assert (pkg / "process" / "run-cards" / "t-judge" / "r1.json").exists()

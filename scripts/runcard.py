@@ -10,6 +10,7 @@ makes the run non-certifying without blocking shadow/debug execution.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,36 @@ TBR_TRACE_FIELDS = [
     "source_refs", "definition_refs", "permission_decision", "gate_outcomes", "refuse",
     "external_actions_taken", "retention_class", "tamper_evidence",
 ]
+
+
+def _text_blob(value: Any) -> str:
+    try:
+        return json.dumps(value, sort_keys=True, ensure_ascii=False).lower()
+    except TypeError:
+        return str(value).lower()
+
+
+def _contains_placeholder(value: Any) -> bool:
+    blob = _text_blob(value)
+    terms = ("todo", "placeholder", "tbd", "to be decided", "n/a", "not applicable",
+             "unknown", "fill me", "dummy", "sample", "example", "\"none\"", "'none'",
+             ": none", "= none", "...")
+    return any(t in blob for t in terms)
+
+
+def _bad_permission_blob(value: Any) -> bool:
+    blob = _text_blob(value)
+    terms = ("god-mode", "god mode", "shared_service", "shared service", "all_resources",
+             "all resources", "any resources", "any resource", "any request", "all tables",
+             "entire crm", "entire database", "everything", "root access", "forever",
+             "unbounded", "*:*", ":*", "/*", ".*")
+    if any(t in blob for t in terms):
+        return True
+    if re.search(r'(?<![a-z0-9_-])\*(?![a-z0-9_-])', blob):
+        return True
+    if re.search(r'(?<![a-z0-9_-])(all|any|every)(?![a-z0-9_-])', blob):
+        return True
+    return False
 
 
 def _normalize_tbr(tbr: dict[str, Any] | None) -> dict[str, Any]:
@@ -65,12 +96,16 @@ def _tbr_certification_blockers(tbr: dict[str, Any]) -> list[str]:
         if not tbr.get(f):
             blockers.append(f"tbr_{f}_missing")
     pd = tbr.get("permission_decision") or {}
-    if pd.get("allowed") is None or not pd.get("policy_ref"):
+    if pd.get("allowed") not in (True, False) or not pd.get("policy_ref"):
         blockers.append("tbr_permission_decision_incomplete")
     if set(TBR_TRACE_FIELDS) - set(tbr.get("trace_fields") or []):
         blockers.append("tbr_trace_fields_incomplete")
     if "TODO" in json.dumps(tbr, ensure_ascii=False):
         blockers.append("tbr_contains_todo")
+    if _contains_placeholder(tbr):
+        blockers.append("tbr_contains_placeholder")
+    if _bad_permission_blob(tbr):
+        blockers.append("tbr_permission_scope_unbounded")
     return blockers
 
 
@@ -201,7 +236,7 @@ def validate_run_card(card: dict) -> list[str]:
             if f not in tbr or tbr[f] in (None, "", [], {}):
                 errors.append(f"TBR run proof requires {f}")
         pd = tbr.get("permission_decision") or {}
-        if pd.get("allowed") is None:
+        if pd.get("allowed") not in (True, False):
             errors.append("TBR permission_decision.allowed must be true/false")
         if not pd.get("policy_ref"):
             errors.append("TBR permission_decision.policy_ref required")

@@ -10,6 +10,7 @@ machine-checkable in cards and visible in run cards.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 TBR_TRACE_FIELDS = [
@@ -191,11 +192,11 @@ def _value(root: dict, dotted: str, default: Any = None) -> Any:
 
 
 def _is_true(value: Any) -> bool:
-    return value is True or (isinstance(value, str) and value.strip().lower() == "true")
+    return value is True
 
 
 def _is_false(value: Any) -> bool:
-    return value is False or (isinstance(value, str) and value.strip().lower() == "false")
+    return value is False
 
 
 def _listish(value: Any) -> list[Any]:
@@ -210,9 +211,17 @@ def _bad_permission_blob(value: Any) -> bool:
         "god-mode", "god mode", "shared_service", "shared service", "all-powerful",
         "all_resources", "all resources", "any resources", "any resource", "any request",
         "all tables", "entire crm", "entire database", "everything",
-        "admin everywhere", "root access", "forever", "unbounded", "*:*", ":*",
+        "admin everywhere", "root access", "forever", "unbounded", "*:*", ":*", "/*", ".*",
     )
-    return any(t in blob for t in bad_terms)
+    if any(t in blob for t in bad_terms):
+        return True
+    if re.search(r'(?<![a-z0-9_-])\*(?![a-z0-9_-])', blob):
+        return True
+    if re.search(r'(?<![a-z0-9_-])(all|any|every)(?![a-z0-9_-])', blob):
+        return True
+    if re.search(r'\b(read|write|access|query|fetch)\s+(all|any|every)\b', blob):
+        return True
+    return False
 
 
 def _placeholder_blob(value: Any) -> bool:
@@ -233,17 +242,17 @@ def _raw_query_policy_blocks_raw_sql(policy: Any) -> bool:
     text = str(policy or "").strip().lower()
     if not text or has_todo(text):
         return False
-    explicit_allow = (
-        "raw_query_allowed" in text or "raw sql allowed" in text or
-        "may query raw" in text or "can query raw" in text
+    raw_terms = ("raw", "sql", "query", "queries", "production", "prod", "table", "tables", "direct")
+    allow_terms = ("allow", "allowed", "allows", "permit", "permitted", "permits", "can", "may", "enabled", "direct")
+    forbid_terms = (
+        "semantic_gate", "semantic gate", "policy gate", "may_not_query_raw",
+        "must_not_query_raw", "not query raw", "no raw", "forbid", "forbidden",
+        "ban", "blocked", "without_a_semantic_or_policy_gate",
+        "agents_may_not_query_raw_production_tables_without_a_semantic_or_policy_gate",
     )
-    if explicit_allow:
+    if any(t in text for t in raw_terms) and any(re.search(rf'(?<![a-z0-9_-]){re.escape(t)}(?![a-z0-9_-])', text) for t in allow_terms):
         return False
-    return any(marker in text for marker in (
-        "semantic_gate", "semantic gate", "semantic layer", "policy gate",
-        "may_not_query_raw", "must_not_query_raw", "not query raw",
-        "no raw", "forbid", "ban", "without_a_semantic_or_policy_gate",
-    ))
+    return any(marker in text for marker in forbid_terms)
 
 
 def _validate_trace_fields(prefix: str, trace_fields: Any) -> list[str]:
@@ -289,6 +298,7 @@ def _require_concrete(errors: list[str], prefix: str, gate: dict, dotted: str) -
 def _validate_workflow_semantics(gate: dict) -> list[str]:
     prefix = "workflow tbr_gate"
     errors: list[str] = []
+    _require_true(errors, prefix, gate, "required")
     if not _raw_query_policy_blocks_raw_sql(_value(gate, "translator.raw_query_policy")):
         errors.append(f"{prefix}: translator.raw_query_policy must forbid raw production SQL unless a semantic/policy gate mediates it")
     _require_exact(errors, prefix, gate, "bouncer.effective_permission_model", "user_via_agent")
@@ -308,6 +318,7 @@ def _validate_workflow_semantics(gate: dict) -> list[str]:
 def _validate_node_semantics(nid: str, gate: dict) -> list[str]:
     prefix = f"{nid}: tbr_gate"
     errors: list[str] = []
+    _require_true(errors, prefix, gate, "required")
     _require_true(errors, prefix, gate, "translator.source_refs_required")
     _require_false(errors, prefix, gate, "translator.raw_query_allowed")
     _require_exact(errors, prefix, gate, "bouncer.human_identity_passthrough", "required")
@@ -338,6 +349,7 @@ def validate_workflow_tbr(workflow: dict) -> list[str]:
     if not gate:
         return ["workflow tbr_gate missing (Translator/Bouncer/Recorder proof required)"]
     errors = _validate_block("workflow tbr_gate", gate, [
+        "required",
         "translator.canonical_definitions",
         "translator.source_of_truth_refs",
         "translator.raw_query_policy",
@@ -362,6 +374,7 @@ def validate_node_tbr(workflow: dict, node_card: dict) -> list[str]:
     if not gate:
         return [f"{nid}: tbr_gate missing (Translator/Bouncer/Recorder proof required)"]
     errors = _validate_block(f"{nid}: tbr_gate", gate, [
+        "required",
         "translator.definition_refs",
         "translator.source_of_truth_refs",
         "translator.source_refs_required",
