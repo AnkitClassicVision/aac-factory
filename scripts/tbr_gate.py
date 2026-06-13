@@ -48,7 +48,7 @@ def todo(field: str) -> str:
 
 
 def has_todo(value: Any) -> bool:
-    return "TODO" in json.dumps(value, ensure_ascii=False)
+    return "todo" in json.dumps(value, ensure_ascii=False).lower()
 
 
 def _text_blob(*values: Any) -> str:
@@ -230,7 +230,9 @@ def _placeholder_blob(value: Any) -> bool:
     placeholder_terms = (
         "TODO", "placeholder", "tbd", "to be decided", "n/a", "not applicable",
         "unknown", "fill me", "owner picks", "dummy", "sample", "example",
-        "\"none\"", "'none'", ": none", "= none", "...",
+        "\"none\"", "'none'", ": none", "= none", "none:", "not_applicable:",
+        "not applicable:", "no_definition", "no definition", "no_source", "no source",
+        "no_truth", "no truth", "no_ref", "no ref", "no proof", "no-proof", "...",
     )
     return any(t.lower() in blob for t in placeholder_terms)
 
@@ -262,6 +264,26 @@ def _validate_trace_fields(prefix: str, trace_fields: Any) -> list[str]:
     if missing:
         return [f"{prefix}: recorder.trace_fields missing {missing}"]
     return []
+
+
+def _validate_canonical_definitions(prefix: str, definitions: Any) -> list[str]:
+    definitions_list = _listish(definitions)
+    if not definitions_list:
+        return [f"{prefix}: translator.canonical_definitions missing/empty"]
+    errors: list[str] = []
+    for i, entry in enumerate(definitions_list):
+        if not isinstance(entry, dict):
+            errors.append(f"{prefix}: translator.canonical_definitions[{i}] must be an object")
+            continue
+        for field in ("term", "definition_ref", "source_of_truth_ref"):
+            value = entry.get(field)
+            if value in (None, "", [], {}):
+                errors.append(f"{prefix}: translator.canonical_definitions[{i}].{field} missing/empty")
+            elif has_todo(value):
+                errors.append(f"{prefix}: translator.canonical_definitions[{i}].{field} still TODO")
+            elif _unsafe_tbr_value(value):
+                errors.append(f"{prefix}: translator.canonical_definitions[{i}].{field} must be concrete and non-placeholder")
+    return errors
 
 
 def _require_true(errors: list[str], prefix: str, gate: dict, dotted: str) -> None:
@@ -306,8 +328,9 @@ def _validate_workflow_semantics(gate: dict) -> list[str]:
     _require_true(errors, prefix, gate, "bouncer.task_scoped_tokens_required")
     _require_true(errors, prefix, gate, "recorder.run_card_required")
     errors.extend(_validate_trace_fields(prefix, _value(gate, "recorder.trace_fields")))
+    errors.extend(_validate_canonical_definitions(prefix, _value(gate, "translator.canonical_definitions")))
     for dotted in (
-        "translator.canonical_definitions", "translator.source_of_truth_refs",
+        "translator.source_of_truth_refs", "bouncer.sensitive_systems",
         "bouncer.policy_engine_ref", "recorder.retention_class",
         "recorder.tamper_evidence", "recorder.review_cadence",
     ):
@@ -355,6 +378,7 @@ def validate_workflow_tbr(workflow: dict) -> list[str]:
         "translator.source_of_truth_refs",
         "translator.raw_query_policy",
         "bouncer.effective_permission_model",
+        "bouncer.sensitive_systems",
         "bouncer.policy_engine_ref",
         "bouncer.task_scoped_tokens_required",
         "recorder.run_card_required",

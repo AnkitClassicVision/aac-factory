@@ -295,6 +295,11 @@ def test_run_card_contract() -> None:
         assert rc_placeholder_tbr["certification_eligible"] is False
         assert "tbr_contains_placeholder" in rc_placeholder_tbr["certification_blockers"]
         assert "tbr_permission_scope_unbounded" in rc_placeholder_tbr["certification_blockers"]
+        rc_no_proof_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_no_proof_tbr["tbr"]["definition_refs"] = ["none:no_definition"]
+        assert runcard.validate_run_card(rc_no_proof_tbr) == []
+        assert rc_no_proof_tbr["certification_eligible"] is False
+        assert "tbr_contains_no_proof_sentinel" in rc_no_proof_tbr["certification_blockers"]
         rc_shared_service_tbr: dict = json.loads(json.dumps(rc_tbr))
         rc_shared_service_tbr["tbr"]["permission_decision"]["policy_ref"] = "policy:shared-service-account"
         assert runcard.validate_run_card(rc_shared_service_tbr) == []
@@ -327,7 +332,12 @@ def test_tbr_gate_fail_closed_contract() -> None:
                 "source_of_truth_refs": ["semantic/active"],
                 "raw_query_policy": "semantic_gate_required",
             },
-            "bouncer": {"effective_permission_model": "user_via_agent", "policy_engine_ref": "policy/runtime", "task_scoped_tokens_required": True},
+            "bouncer": {
+                "effective_permission_model": "user_via_agent",
+                "sensitive_systems": ["crm:customer_sensitive_fields"],
+                "policy_engine_ref": "policy/runtime",
+                "task_scoped_tokens_required": True,
+            },
             "recorder": {
                 "run_card_required": True,
                 "trace_fields": list(tbr_gate.TBR_TRACE_FIELDS),
@@ -337,6 +347,16 @@ def test_tbr_gate_fail_closed_contract() -> None:
         },
     }
     assert any("review_cadence" in e for e in tbr_gate.validate_workflow_tbr(workflow_missing_cadence))
+    workflow_missing_sensitive = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_missing_sensitive["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    workflow_missing_sensitive["tbr_gate"]["bouncer"].pop("sensitive_systems")
+    assert any("sensitive_systems" in e for e in tbr_gate.validate_workflow_tbr(workflow_missing_sensitive))
+    workflow_bad_canonical_definition = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_bad_canonical_definition["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    workflow_bad_canonical_definition["tbr_gate"]["translator"]["canonical_definitions"] = [{"term": "active_customer"}]
+    bad_definition_errors = tbr_gate.validate_workflow_tbr(workflow_bad_canonical_definition)
+    assert any("canonical_definitions[0].definition_ref" in e for e in bad_definition_errors)
+    assert any("canonical_definitions[0].source_of_truth_ref" in e for e in bad_definition_errors)
 
     workflow_required_false = {"max_lane": "draft", "tbr_gate": {"required": False}}
     node_required_false = {"node_id": "n", "runtime_mode": "C", "tbr_gate": {"required": False}}
@@ -383,11 +403,13 @@ def test_tbr_gate_fail_closed_contract() -> None:
     bad_semantic_workflow["tbr_gate"]["bouncer"]["task_scoped_tokens_required"] = False
     bad_semantic_workflow["tbr_gate"]["translator"]["raw_query_policy"] = "raw SQL allowed with semantic gate"
     bad_semantic_workflow["tbr_gate"]["translator"]["source_of_truth_refs"] = ["placeholder"]
+    bad_semantic_workflow["tbr_gate"]["bouncer"]["sensitive_systems"] = ["none:no_sensitive_map"]
     bad_workflow_errors = tbr_gate.validate_workflow_tbr(bad_semantic_workflow)
     assert any("effective_permission_model" in e for e in bad_workflow_errors)
     assert any("task_scoped_tokens_required" in e for e in bad_workflow_errors)
     assert any("raw_query_policy" in e for e in bad_workflow_errors)
     assert any("source_of_truth_refs" in e and "concrete" in e for e in bad_workflow_errors)
+    assert any("sensitive_systems" in e and "concrete" in e for e in bad_workflow_errors)
 
     node_bad_semantics = json.loads(json.dumps(node_missing_forbidden))
     node_bad_semantics["tbr_gate"]["bouncer"]["forbidden_resources"] = ["hr:salary"]

@@ -47,6 +47,14 @@ def _contains_placeholder(value: Any) -> bool:
     return any(t in blob for t in terms)
 
 
+def _contains_no_proof_sentinel(value: Any) -> bool:
+    blob = _text_blob(value)
+    terms = ("none:", "not_applicable:", "not applicable:", "no_definition", "no definition",
+             "no_source", "no source", "no_policy", "no policy", "no_truth", "no truth",
+             "no_ref", "no ref", "no proof", "no-proof")
+    return any(t in blob for t in terms)
+
+
 def _bad_permission_blob(value: Any) -> bool:
     blob = _text_blob(value)
     terms = ("god-mode", "god mode", "shared_service", "shared service", "shared-service",
@@ -102,8 +110,12 @@ def _tbr_certification_blockers(tbr: dict[str, Any]) -> list[str]:
         blockers.append("tbr_permission_decision_incomplete")
     if set(TBR_TRACE_FIELDS) - set(tbr.get("trace_fields") or []):
         blockers.append("tbr_trace_fields_incomplete")
-    if "TODO" in json.dumps(tbr, ensure_ascii=False):
+    if "todo" in json.dumps(tbr, ensure_ascii=False).lower():
         blockers.append("tbr_contains_todo")
+    no_proof_fields = [tbr.get(f) for f in ("definition_refs", "semantic_source_refs", "retention_class", "tamper_evidence")]
+    no_proof_fields.append(pd.get("policy_ref"))
+    if any(_contains_no_proof_sentinel(v) for v in no_proof_fields):
+        blockers.append("tbr_contains_no_proof_sentinel")
     if _contains_placeholder(tbr):
         blockers.append("tbr_contains_placeholder")
     if _bad_permission_blob(tbr):
