@@ -345,6 +345,10 @@ def test_tbr_gate_fail_closed_contract() -> None:
     workflow_exempt = {"max_lane": "internal_artifact_only", "tbr_gate": {
         "required": False, "non_certifying": True, "exemption_reason": "offline fixture package"}}
     assert tbr_gate.tbr_required_for_workflow(workflow_exempt) is False
+    for placeholder_reason in ("todo later", "n/a", "none"):
+        workflow_bad_exempt = {"max_lane": "internal_artifact_only", "tbr_gate": {
+            "required": False, "non_certifying": True, "exemption_reason": placeholder_reason}}
+        assert tbr_gate.tbr_required_for_workflow(workflow_bad_exempt) is True
 
     node_missing_forbidden = {
         "node_id": "n",

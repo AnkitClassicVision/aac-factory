@@ -62,7 +62,7 @@ def tbr_exemption_valid(workflow: dict) -> bool:
     reason_clean = reason.strip() if isinstance(reason, str) else ""
     return bool(gate.get("required") is False
                 and gate.get("non_certifying") is True
-                and reason_clean and "TODO" not in reason_clean
+                and reason_clean and not _placeholder_blob(reason_clean)
                 and lane in {"design_scaffold", "internal_artifact_only", "shadow"})
 
 
