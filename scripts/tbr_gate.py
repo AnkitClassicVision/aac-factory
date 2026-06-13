@@ -19,12 +19,20 @@ TBR_TRACE_FIELDS = [
     "runtime_mode",
     "input_ref",
     "output_ref",
+    "prompt_ref",
+    "prompt_version",
+    "response_ref",
+    "tool_call_refs",
+    "user_ref",
+    "recipient_ref",
     "source_refs",
     "definition_refs",
     "permission_decision",
     "gate_outcomes",
     "refuse",
     "external_actions_taken",
+    "retention_class",
+    "tamper_evidence",
 ]
 
 SENSITIVE_HINTS = (
@@ -144,6 +152,8 @@ def default_node_tbr_gate(workflow: dict | None = None, node_card: dict | None =
             "permission_decision_logged": True,
             "definition_refs_logged": True,
             "source_refs_logged": True,
+            "retention_class": todo("log retention class inherited from workflow or stricter"),
+            "tamper_evidence": todo("append-only store / checksum / WORM / external log sink"),
         },
     }
 
@@ -171,24 +181,141 @@ def _validate_block(prefix: str, gate: dict, required_paths: list[str]) -> list[
     return errors
 
 
+def _value(root: dict, dotted: str, default: Any = None) -> Any:
+    cur: Any = root
+    for part in dotted.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return default
+        cur = cur[part]
+    return cur
+
+
+def _is_true(value: Any) -> bool:
+    return value is True or (isinstance(value, str) and value.strip().lower() == "true")
+
+
+def _is_false(value: Any) -> bool:
+    return value is False or (isinstance(value, str) and value.strip().lower() == "false")
+
+
+def _listish(value: Any) -> list[Any]:
+    if value in (None, ""):
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _bad_permission_blob(value: Any) -> bool:
+    blob = _text_blob(value)
+    bad_terms = (
+        "god-mode", "god mode", "shared_service", "shared service", "all-powerful",
+        "all_resources", "all resources", "all tables", "entire crm", "entire database",
+        "admin everywhere", "root access", "forever", "unbounded", "*:*",
+    )
+    return any(t in blob for t in bad_terms)
+
+
+def _raw_query_policy_blocks_raw_sql(policy: Any) -> bool:
+    text = str(policy or "").strip().lower()
+    if not text or has_todo(text):
+        return False
+    explicit_allow = (
+        "raw_query_allowed" in text or "raw sql allowed" in text or
+        "may query raw" in text or "can query raw" in text
+    )
+    if explicit_allow and "without" not in text and "semantic" not in text and "policy" not in text:
+        return False
+    return any(marker in text for marker in (
+        "semantic_gate", "semantic gate", "semantic layer", "policy gate",
+        "may_not_query_raw", "must_not_query_raw", "not query raw",
+        "no raw", "forbid", "ban", "without_a_semantic_or_policy_gate",
+    ))
+
+
+def _validate_trace_fields(prefix: str, trace_fields: Any) -> list[str]:
+    fields = set(_listish(trace_fields))
+    missing = sorted(set(TBR_TRACE_FIELDS) - fields)
+    if missing:
+        return [f"{prefix}: recorder.trace_fields missing {missing}"]
+    return []
+
+
+def _require_true(errors: list[str], prefix: str, gate: dict, dotted: str) -> None:
+    value = _value(gate, dotted)
+    if not _is_true(value):
+        errors.append(f"{prefix}: {dotted} must be true")
+
+
+def _require_false(errors: list[str], prefix: str, gate: dict, dotted: str) -> None:
+    value = _value(gate, dotted)
+    if not _is_false(value):
+        errors.append(f"{prefix}: {dotted} must be false")
+
+
+def _require_exact(errors: list[str], prefix: str, gate: dict, dotted: str, expected: str) -> None:
+    value = str(_value(gate, dotted, "") or "").strip().lower()
+    if value != expected:
+        errors.append(f"{prefix}: {dotted} must be {expected}")
+
+
+def _require_bounded(errors: list[str], prefix: str, gate: dict, dotted: str) -> None:
+    value = _value(gate, dotted)
+    if _bad_permission_blob(value):
+        errors.append(f"{prefix}: {dotted} appears unbounded or shared/god-mode")
+
+
+def _validate_workflow_semantics(gate: dict) -> list[str]:
+    prefix = "workflow tbr_gate"
+    errors: list[str] = []
+    if not _raw_query_policy_blocks_raw_sql(_value(gate, "translator.raw_query_policy")):
+        errors.append(f"{prefix}: translator.raw_query_policy must forbid raw production SQL unless a semantic/policy gate mediates it")
+    _require_exact(errors, prefix, gate, "bouncer.effective_permission_model", "user_via_agent")
+    _require_true(errors, prefix, gate, "bouncer.task_scoped_tokens_required")
+    _require_true(errors, prefix, gate, "recorder.run_card_required")
+    errors.extend(_validate_trace_fields(prefix, _value(gate, "recorder.trace_fields")))
+    _require_bounded(errors, prefix, gate, "bouncer.policy_engine_ref")
+    return errors
+
+
+def _validate_node_semantics(nid: str, gate: dict) -> list[str]:
+    prefix = f"{nid}: tbr_gate"
+    errors: list[str] = []
+    _require_true(errors, prefix, gate, "translator.source_refs_required")
+    _require_false(errors, prefix, gate, "translator.raw_query_allowed")
+    _require_exact(errors, prefix, gate, "bouncer.human_identity_passthrough", "required")
+    for dotted in (
+        "bouncer.agent_identity", "bouncer.allowed_resources", "bouncer.effective_permission_path",
+        "bouncer.task_scope", "bouncer.forbidden_resources",
+    ):
+        _require_bounded(errors, prefix, gate, dotted)
+    _require_true(errors, prefix, gate, "recorder.run_card_required")
+    _require_true(errors, prefix, gate, "recorder.permission_decision_logged")
+    _require_true(errors, prefix, gate, "recorder.definition_refs_logged")
+    _require_true(errors, prefix, gate, "recorder.source_refs_logged")
+    errors.extend(_validate_trace_fields(prefix, _value(gate, "recorder.trace_fields")))
+    return errors
+
+
 def validate_workflow_tbr(workflow: dict) -> list[str]:
     if not tbr_required_for_workflow(workflow):
         return []
     gate = workflow.get("tbr_gate") or {}
     if not gate:
         return ["workflow tbr_gate missing (Translator/Bouncer/Recorder proof required)"]
-    return _validate_block("workflow tbr_gate", gate, [
+    errors = _validate_block("workflow tbr_gate", gate, [
         "translator.canonical_definitions",
         "translator.source_of_truth_refs",
         "translator.raw_query_policy",
         "bouncer.effective_permission_model",
         "bouncer.policy_engine_ref",
+        "bouncer.task_scoped_tokens_required",
         "recorder.run_card_required",
         "recorder.trace_fields",
         "recorder.retention_class",
         "recorder.tamper_evidence",
         "recorder.review_cadence",
     ])
+    errors.extend(_validate_workflow_semantics(gate))
+    return errors
 
 
 def validate_node_tbr(workflow: dict, node_card: dict) -> list[str]:
@@ -198,9 +325,11 @@ def validate_node_tbr(workflow: dict, node_card: dict) -> list[str]:
     gate = node_card.get("tbr_gate") or {}
     if not gate:
         return [f"{nid}: tbr_gate missing (Translator/Bouncer/Recorder proof required)"]
-    return _validate_block(f"{nid}: tbr_gate", gate, [
+    errors = _validate_block(f"{nid}: tbr_gate", gate, [
         "translator.definition_refs",
         "translator.source_of_truth_refs",
+        "translator.source_refs_required",
+        "translator.raw_query_allowed",
         "bouncer.agent_identity",
         "bouncer.human_identity_passthrough",
         "bouncer.allowed_resources",
@@ -210,7 +339,13 @@ def validate_node_tbr(workflow: dict, node_card: dict) -> list[str]:
         "recorder.run_card_required",
         "recorder.trace_fields",
         "recorder.permission_decision_logged",
+        "recorder.definition_refs_logged",
+        "recorder.source_refs_logged",
+        "recorder.retention_class",
+        "recorder.tamper_evidence",
     ])
+    errors.extend(_validate_node_semantics(nid, gate))
+    return errors
 
 
 def tbr_status(workflow: dict, node_cards: list[dict]) -> dict:

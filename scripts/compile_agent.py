@@ -261,6 +261,7 @@ def main() -> None:
             "node_id": nid, "module": module, "runtime_mode": rm,
             "execution": enrich_execution(c.get("execution", {}), str(c.get("model") or ""), cfg),
             "model": c.get("model"),
+            "prompt_ref": c.get("prompt_ref"),
             "prompt_version": c.get("prompt_version"),
             "confidence_floor": float(floor) if isinstance(floor, (int, float)) else 0.6,
             "bounded_actions": c.get("bounded_actions") or [],

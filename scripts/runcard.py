@@ -24,8 +24,9 @@ UNKNOWN_USAGE = {"tokens_in": "unknown", "tokens_out": "unknown", "cost_usd": "u
                  "usage_source": "unknown", "actual_usage_available": False}
 TBR_TRACE_FIELDS = [
     "run_id", "workflow", "node_id", "runtime_mode", "input_ref", "output_ref",
+    "prompt_ref", "prompt_version", "response_ref", "tool_call_refs", "user_ref", "recipient_ref",
     "source_refs", "definition_refs", "permission_decision", "gate_outcomes", "refuse",
-    "external_actions_taken",
+    "external_actions_taken", "retention_class", "tamper_evidence",
 ]
 
 
@@ -34,7 +35,14 @@ def _normalize_tbr(tbr: dict[str, Any] | None) -> dict[str, Any]:
         "definition_refs": [],
         "permission_decision": {"allowed": None, "policy_ref": "", "reason": ""},
         "semantic_source_refs": [],
+        "prompt_ref": "",
+        "prompt_version": "",
+        "response_ref": "",
+        "tool_call_refs": [],
+        "user_ref": "",
         "recipient_ref": "",
+        "retention_class": "",
+        "tamper_evidence": "",
         "audit_notes": "",
         "trace_fields": list(TBR_TRACE_FIELDS),
     }
@@ -51,10 +59,11 @@ def _normalize_tbr(tbr: dict[str, Any] | None) -> dict[str, Any]:
 
 def _tbr_certification_blockers(tbr: dict[str, Any]) -> list[str]:
     blockers: list[str] = []
-    if not tbr.get("definition_refs"):
-        blockers.append("tbr_definition_refs_missing")
-    if not tbr.get("semantic_source_refs"):
-        blockers.append("tbr_semantic_source_refs_missing")
+    for f in ("definition_refs", "semantic_source_refs", "prompt_ref", "prompt_version",
+              "response_ref", "tool_call_refs", "user_ref", "recipient_ref",
+              "retention_class", "tamper_evidence"):
+        if not tbr.get(f):
+            blockers.append(f"tbr_{f}_missing")
     pd = tbr.get("permission_decision") or {}
     if pd.get("allowed") is None or not pd.get("policy_ref"):
         blockers.append("tbr_permission_decision_incomplete")
@@ -107,6 +116,11 @@ def new_run_card(**fields) -> dict:
         "executor": fields.get("executor", "unknown"),
         "adapter_version": fields.get("adapter_version", "unknown"),
         "prompt_version": None,
+        "prompt_ref": fields.get("prompt_ref") or tbr.get("prompt_ref") or "",
+        "response_ref": fields.get("response_ref") or tbr.get("response_ref") or "",
+        "tool_call_refs": fields.get("tool_call_refs") or tbr.get("tool_call_refs") or [],
+        "user_ref": fields.get("user_ref") or tbr.get("user_ref") or "",
+        "recipient_ref": fields.get("recipient_ref") or tbr.get("recipient_ref") or "",
         "usage": usage,
         "cost": {"tokens_in": usage.get("tokens_in", "unknown"),
                  "tokens_out": usage.get("tokens_out", "unknown"),
@@ -132,6 +146,14 @@ def new_run_card(**fields) -> dict:
     fields.pop("certification_eligible", None)
     fields.pop("certification_blockers", None)
     card.update(fields)
+    if card.get("tbr_required"):
+        for key in ("prompt_ref", "response_ref", "tool_call_refs", "user_ref", "recipient_ref"):
+            if not card.get(key) and tbr.get(key):
+                card[key] = tbr[key]
+            if not tbr.get(key) and card.get(key):
+                tbr[key] = card[key]
+        if not tbr.get("prompt_version") and card.get("prompt_version"):
+            tbr["prompt_version"] = card["prompt_version"]
     if card["runtime_mode"] in {"C", "A"}:
         blockers = set(card.get("certification_blockers") or [])
         if not card.get("model_verified"):
@@ -173,7 +195,9 @@ def validate_run_card(card: dict) -> list[str]:
     if card.get("tbr_required"):
         tbr = _normalize_tbr(card.get("tbr") or {})
         card["tbr"] = tbr
-        for f in ("definition_refs", "permission_decision", "semantic_source_refs", "trace_fields"):
+        for f in ("definition_refs", "permission_decision", "semantic_source_refs", "trace_fields",
+                  "prompt_ref", "prompt_version", "response_ref", "tool_call_refs",
+                  "user_ref", "recipient_ref", "retention_class", "tamper_evidence"):
             if f not in tbr or tbr[f] in (None, "", [], {}):
                 errors.append(f"TBR run proof requires {f}")
         pd = tbr.get("permission_decision") or {}

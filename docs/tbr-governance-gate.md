@@ -36,7 +36,12 @@ Generated workflow cards now include `tbr_gate`:
     },
     "recorder": {
       "run_card_required": true,
-      "trace_fields": ["run_id", "workflow", "node_id", "definition_refs", "permission_decision", "source_refs"],
+      "trace_fields": [
+        "run_id", "workflow", "node_id", "runtime_mode", "input_ref", "output_ref",
+        "prompt_ref", "prompt_version", "response_ref", "tool_call_refs", "user_ref", "recipient_ref",
+        "source_refs", "definition_refs", "permission_decision", "gate_outcomes", "refuse",
+        "external_actions_taken", "retention_class", "tamper_evidence"
+      ],
       "retention_class": "...",
       "tamper_evidence": "..."
     }
@@ -48,12 +53,20 @@ Generated node cards now include node-level `tbr_gate` with:
 
 - `translator.definition_refs`
 - `translator.source_of_truth_refs`
+- `translator.source_refs_required`
+- `translator.raw_query_allowed`
 - `bouncer.agent_identity`
 - `bouncer.human_identity_passthrough`
 - `bouncer.allowed_resources`
+- `bouncer.forbidden_resources`
 - `bouncer.effective_permission_path`
 - `bouncer.task_scope`
 - `recorder.trace_fields`
+- `recorder.permission_decision_logged`
+- `recorder.definition_refs_logged`
+- `recorder.source_refs_logged`
+- `recorder.retention_class`
+- `recorder.tamper_evidence`
 
 Default scaffolds intentionally contain `TODO` fields. That is correct: the factory may scaffold the layer, but certification waits for source owners to fill the actual semantic definitions, policy refs, and recorder controls.
 
@@ -86,14 +99,27 @@ Compiled runtimes now write TBR proof into each run card:
 - `tbr.definition_refs`
 - `tbr.semantic_source_refs`
 - `tbr.permission_decision`
+- `tbr.prompt_ref`
+- `tbr.prompt_version`
+- `tbr.response_ref`
+- `tbr.tool_call_refs`
+- `tbr.user_ref`
 - `tbr.recipient_ref`
 - `tbr.trace_fields`
+- `tbr.retention_class`
+- `tbr.tamper_evidence`
 
 If TBR proof is incomplete or still contains TODO fields, the run may execute in shadow/debug mode but is marked non-certifying through `certification_blockers` such as:
 
 - `tbr_definition_refs_missing`
+- `tbr_semantic_source_refs_missing`
+- `tbr_prompt_ref_missing`
+- `tbr_tool_call_refs_missing`
+- `tbr_user_ref_missing`
 - `tbr_permission_decision_incomplete`
 - `tbr_trace_fields_incomplete`
+- `tbr_retention_class_missing`
+- `tbr_tamper_evidence_missing`
 - `tbr_contains_todo`
 
 This matches v0.3 Runtime Truth: claims are either physically enforced, explicitly non-certifying, or blocked before certification/promotion.

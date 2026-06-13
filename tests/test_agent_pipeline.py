@@ -246,12 +246,29 @@ def test_run_card_contract() -> None:
                                       adapter_version="test", prompt_version="1.0.0", tbr_required=True,
                                       tbr={"definition_refs": ["def:active-customer"],
                                            "semantic_source_refs": ["warehouse.metric_view"],
+                                           "prompt_ref": "process/prompts/t-judge.md",
+                                           "prompt_version": "1.0.0",
+                                           "response_ref": "out",
+                                           "tool_call_refs": ["none:no_tool_calls"],
+                                           "user_ref": "user:test",
+                                           "recipient_ref": "recipient:test",
+                                           "retention_class": "six_months",
+                                           "tamper_evidence": "append_only_log",
+                                           "trace_fields": list(runcard.TBR_TRACE_FIELDS),
                                            "permission_decision": {"allowed": True, "policy_ref": "policy:user-via-agent", "reason": "test"}})
         assert runcard.validate_run_card(rc_tbr) == []
         rc_todo_tbr: dict = dict(rc_tbr, run_id="r1todo", certification_eligible=True, certification_blockers=[])
         rc_todo_tbr["tbr"] = {
             "definition_refs": ["TODO: semantic definition"],
             "semantic_source_refs": ["warehouse.metric_view"],
+            "prompt_ref": "process/prompts/t-judge.md",
+            "prompt_version": "1.0.0",
+            "response_ref": "out",
+            "tool_call_refs": ["none:no_tool_calls"],
+            "user_ref": "user:test",
+            "recipient_ref": "recipient:test",
+            "retention_class": "six_months",
+            "tamper_evidence": "append_only_log",
             "permission_decision": {"allowed": True, "policy_ref": "policy:user-via-agent", "reason": "test"},
             "trace_fields": list(runcard.TBR_TRACE_FIELDS),
         }
@@ -281,7 +298,7 @@ def test_tbr_gate_fail_closed_contract() -> None:
                 "source_of_truth_refs": ["semantic/active"],
                 "raw_query_policy": "semantic_gate_required",
             },
-            "bouncer": {"effective_permission_model": "user_via_agent", "policy_engine_ref": "policy/runtime"},
+            "bouncer": {"effective_permission_model": "user_via_agent", "policy_engine_ref": "policy/runtime", "task_scoped_tokens_required": True},
             "recorder": {
                 "run_card_required": True,
                 "trace_fields": list(tbr_gate.TBR_TRACE_FIELDS),
@@ -305,7 +322,8 @@ def test_tbr_gate_fail_closed_contract() -> None:
         "runtime_mode": "C",
         "tbr_gate": {
             "required": True,
-            "translator": {"definition_refs": ["defs/active"], "source_of_truth_refs": ["semantic/active"]},
+            "translator": {"definition_refs": ["defs/active"], "source_of_truth_refs": ["semantic/active"],
+                           "source_refs_required": True, "raw_query_allowed": False},
             "bouncer": {
                 "agent_identity": "agent:n",
                 "human_identity_passthrough": "required",
@@ -317,10 +335,36 @@ def test_tbr_gate_fail_closed_contract() -> None:
                 "run_card_required": True,
                 "trace_fields": list(tbr_gate.TBR_TRACE_FIELDS),
                 "permission_decision_logged": True,
+                "definition_refs_logged": True,
+                "source_refs_logged": True,
+                "retention_class": "six_months",
+                "tamper_evidence": "append_only_log",
             },
         },
     }
     assert any("forbidden_resources" in e for e in tbr_gate.validate_node_tbr(workflow_missing_cadence, node_missing_forbidden))
+
+    bad_semantic_workflow = json.loads(json.dumps(workflow_missing_cadence))
+    bad_semantic_workflow["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    bad_semantic_workflow["tbr_gate"]["bouncer"]["effective_permission_model"] = "shared_service_account"
+    bad_semantic_workflow["tbr_gate"]["bouncer"]["task_scoped_tokens_required"] = False
+    bad_semantic_workflow["tbr_gate"]["translator"]["raw_query_policy"] = "raw SQL allowed"
+    bad_workflow_errors = tbr_gate.validate_workflow_tbr(bad_semantic_workflow)
+    assert any("effective_permission_model" in e for e in bad_workflow_errors)
+    assert any("task_scoped_tokens_required" in e for e in bad_workflow_errors)
+    assert any("raw_query_policy" in e for e in bad_workflow_errors)
+
+    node_bad_semantics = json.loads(json.dumps(node_missing_forbidden))
+    node_bad_semantics["tbr_gate"]["bouncer"]["forbidden_resources"] = ["hr:salary"]
+    node_bad_semantics["tbr_gate"]["bouncer"]["human_identity_passthrough"] = "not_required"
+    node_bad_semantics["tbr_gate"]["translator"]["raw_query_allowed"] = True
+    node_bad_semantics["tbr_gate"]["recorder"]["permission_decision_logged"] = False
+    node_bad_semantics["tbr_gate"]["recorder"]["trace_fields"] = ["run_id"]
+    bad_node_errors = tbr_gate.validate_node_tbr(workflow_missing_cadence, node_bad_semantics)
+    assert any("human_identity_passthrough" in e for e in bad_node_errors)
+    assert any("raw_query_allowed" in e for e in bad_node_errors)
+    assert any("permission_decision_logged" in e for e in bad_node_errors)
+    assert any("recorder.trace_fields" in e for e in bad_node_errors)
     print("[OK] TBR gate fail-closed contract test passed")
 
 

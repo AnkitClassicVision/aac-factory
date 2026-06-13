@@ -148,15 +148,23 @@ def main() -> None:
     all_tbr = wf_tbr + node_tbr
     missing_tbr = [b for b in all_tbr if "missing" in b or "empty" in b]
     todo_tbr = [b for b in all_tbr if "TODO" in b]
-    trace_fields = (((wf.get("tbr_gate") or {}).get("recorder") or {}).get("trace_fields") or [])
-    trace_ok = set(TBR_TRACE_FIELDS) <= set(trace_fields)
+    workflow_trace_fields = (((wf.get("tbr_gate") or {}).get("recorder") or {}).get("trace_fields") or [])
+    node_trace_incomplete = []
+    for nid, c in cards.items():
+        if not c:
+            continue
+        node_trace_fields = (((c.get("tbr_gate") or {}).get("recorder") or {}).get("trace_fields") or [])
+        if set(TBR_TRACE_FIELDS) - set(node_trace_fields):
+            node_trace_incomplete.append(nid)
+    trace_ok = (set(TBR_TRACE_FIELDS) <= set(workflow_trace_fields)) and not node_trace_incomplete
     add("tbr_gate_present", "critical",
         "Translator/Bouncer/Recorder gate exists on workflow and node cards?",
         "PASS" if not missing_tbr else "FAIL", f"missing={missing_tbr[:6]}",
         auto_fixable=bool(missing_tbr), fix_class="derivable_fields")
     add("tbr_recorder_trace_contract", "critical",
         "Recorder declares the portable trace fields needed to prove what happened?",
-        "PASS" if trace_ok else "FAIL", f"trace_fields={trace_fields}",
+        "PASS" if trace_ok else "FAIL",
+        f"workflow_trace_fields={workflow_trace_fields} node_trace_incomplete={node_trace_incomplete[:6]}",
         auto_fixable=not trace_ok, fix_class="derivable_fields")
     add("tbr_gate_resolved", "major",
         "Translator definitions, bouncer permission path, and recorder policy are filled beyond TODO before certification?",
