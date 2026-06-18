@@ -7,6 +7,10 @@ part, inspects its own work like a blind auditor, fixes the boring defects itsel
 node against its objective function, and hands you back a verdict plus a short async queue of the
 only decisions that are genuinely human.
 
+Loop architecture is canonical here: a loop is the bounded improvement system, a gate/router chooses
+repeat/repair/escalate/exit/promote, and AAC Factory is one intervention-builder inside larger
+business/life loops. See [`docs/LOOP-ARCHITECTURE.md`](docs/LOOP-ARCHITECTURE.md).
+
 ```mermaid
 flowchart LR
   A[One-sentence idea] ==> B[Grill: brain prefill + live data probe]
@@ -93,6 +97,10 @@ develops on the open split only; selection code cannot read the holdout.
 when a provider path exists. Until the S6 compiler ships live executors, evals run on stub
 (replay) executors: the loop mechanics are test-proven; live model quality measurement arrives
 with the compiler.
+
+This is the node-level version of the broader loop architecture in
+[`docs/LOOP-ARCHITECTURE.md`](docs/LOOP-ARCHITECTURE.md): evidence enters, a gate routes repeat /
+repair / escalate / exit / promote, and every adopted change re-enters QA and the readiness ladder.
 
 ## QA: dark-factory holdout
 
