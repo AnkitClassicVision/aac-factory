@@ -4,6 +4,11 @@ Every judgment node (runtime C/A) is an optimizable unit with a measurable objec
 The loop optimizes against the objective, never against vibes, and every adopted change re-enters
 the same gates as a human change.
 
+This is the node-level implementation of the broader factory loop architecture in
+[`LOOP-ARCHITECTURE.md`](LOOP-ARCHITECTURE.md): a loop reads evidence, a gate/router chooses repeat /
+repair / escalate / exit / promote, and promotion remains controlled by proof, holdout evidence,
+the readiness ladder, and human-over-loop residue ownership.
+
 ## Objective function (on every C/A node card)
 
 ```json
