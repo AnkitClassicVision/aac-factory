@@ -23,6 +23,19 @@ sys.path.insert(0, str(REPO / "tests"))
 from test_improvement_loop import build_pkg  # noqa: E402
 
 
+def make_workflow_conditions_parseable(pkg: Path) -> None:
+    wf_path = pkg / "process" / "workflow.aac.json"
+    wf = json.loads(wf_path.read_text(encoding="utf-8"))
+    replacements = {
+        "low confidence": "confidence < 0.6",
+        "approved": "decision == \"queued_for_human\"",
+        "violation": "decision == \"hard_refuse\"",
+    }
+    for edge in wf.get("edges", []):
+        edge["condition"] = replacements.get(edge.get("condition"), edge.get("condition", "always"))
+    wf_path.write_text(json.dumps(wf, indent=2), encoding="utf-8")
+
+
 def run(cmd, cwd, env=None) -> subprocess.CompletedProcess:
     e = dict(os.environ)
     e.update(env or {})
@@ -49,14 +62,22 @@ def test_compiler() -> None:
         r = run([PY, "scripts/compile_agent.py", str(pkg)], work)
         assert r.returncode != 0 and "no model" in r.stdout + r.stderr, "must refuse TODO model"
 
-        # Adopt a model via the improver (the sanctioned path), then compile
-        run([PY, "scripts/improve_node.py", str(pkg), "t-judge"], work)
+        # Set a concrete model, then prove prose routing conditions fail compile.
+        judge["model"] = "claude-sonnet-4-6"
+        judge_path.write_text(json.dumps(judge, indent=2), encoding="utf-8")
+        r = run([PY, "scripts/compile_agent.py", str(pkg)], work)
+        assert r.returncode != 0 and "non-machine-evaluable condition" in r.stdout + r.stderr, \
+            "prose edge conditions must fail compile"
+
+        # Fix the routing grammar, then compile.
+        make_workflow_conditions_parseable(pkg)
         r = run([PY, "scripts/compile_agent.py", str(pkg)], work)
         assert r.returncode == 0, r.stdout + r.stderr
         assert "COMPILED" in r.stdout
         build = pkg / "build"
         assert (build / "agent" / "main.py").exists() and (build / "agent" / "nodes.json").exists()
         graph = json.loads((build / "agent" / "nodes.json").read_text(encoding="utf-8"))
+        assert graph["nodes"]["t-judge"]["tbr_gate"]["required"] is True
         # synthetic package has graded goldens (R2) but TODO fields (R1 blocked) -> shadow forced
         assert graph["lane"] == "internal_artifact_only", "shadow lane must be forced on R1-blocked package"
 
@@ -77,6 +98,26 @@ def test_compiler() -> None:
             "H node must queue for the human"
         runs = list((pkg / "process" / "run-cards" / "t-judge").glob("*.json"))
         assert runs, "run card per node execution"
+        card = json.loads(runs[-1].read_text(encoding="utf-8"))
+        assert card["tbr_required"] is True
+        assert card["tbr"]["permission_decision"]["allowed"] is True
+        assert "tbr_contains_todo" in card["certification_blockers"], "shadow package must not certify with TODO TBR refs"
+
+        # Required TBR with no explicit Translator source refs must not backfill compiled workflow path as proof.
+        graph_path = build / "agent" / "nodes.json"
+        missing_source_graph = json.loads(graph_path.read_text(encoding="utf-8"))
+        missing_source_graph["nodes"]["t-judge"]["tbr_gate"]["translator"].pop("source_of_truth_refs", None)
+        graph_path.write_text(json.dumps(missing_source_graph, indent=2), encoding="utf-8")
+        before_runs = {p.name for p in (pkg / "process" / "run-cards" / "t-judge").glob("*.json")}
+        r = run([PY, str(build / "agent" / "main.py"), "{}"], work,
+                env={"FACTORY_FAKE_LLM": "1", "FACTORY_FAKE_CONFIDENCE": "0.95"})
+        assert r.returncode == 0, r.stdout + r.stderr
+        new_runs = [p for p in (pkg / "process" / "run-cards" / "t-judge").glob("*.json") if p.name not in before_runs]
+        assert new_runs, "missing-source run must emit a new run card"
+        missing_source_card = json.loads(new_runs[-1].read_text(encoding="utf-8"))
+        assert missing_source_card["tbr"]["semantic_source_refs"] == ["audit:no_source"]
+        assert "tbr_contains_no_proof_sentinel" in missing_source_card["certification_blockers"]
+        graph_path.write_text(json.dumps(graph, indent=2), encoding="utf-8")
 
         # Low confidence -> below floor -> routes toward human/refuse, escalation recorded
         r = run([PY, str(build / "agent" / "main.py"), "{}"], work,

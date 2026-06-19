@@ -149,11 +149,16 @@ def test_pipeline() -> None:
         assert any("tension" in f for f in cw["flags"]), "tension edge must surface as a flag"
 
         run([PY, "scripts/concept_to_process.py", str(pkg)], work)
+        wf = json.loads((pkg / "process" / "workflow.aac.json").read_text(encoding="utf-8"))
+        assert wf["tbr_gate"]["translator"]["raw_query_policy"].startswith("agents_may_not_query_raw")
+        assert wf["tbr_gate"]["recorder"]["run_card_required"] is True
         for nid in ("t-intake", "t-judge", "t-review"):
             card = json.loads((pkg / "process" / "nodes" / f"{nid}.aac.json").read_text(encoding="utf-8"))
             assert card["atlas_ref"] == ATLAS["process_map"][nid]
             assert card["concept_ref"].startswith("node_"), f"{nid} concept_ref unresolved"
             assert card["telemetry"]["run_card_required"] is True
+            assert card["tbr_gate"]["bouncer"]["human_identity_passthrough"] == "required"
+            assert card["tbr_gate"]["recorder"]["permission_decision_logged"] is True
         judge = json.loads((pkg / "process" / "nodes" / "t-judge.aac.json").read_text(encoding="utf-8"))
         assert judge["prompt_ref"] == "process/prompts/t-judge.md"
         assert (pkg / "process" / "prompts" / "t-judge.md").exists()
@@ -161,6 +166,8 @@ def test_pipeline() -> None:
         run([PY, "scripts/validate_agent_package.py", str(pkg), "--strict"], work)
         report = json.loads((pkg / "exports" / "readiness_report.json").read_text(encoding="utf-8"))
         assert report["ladder"]["R0_design_scaffold"]["pass"] is True
+        assert report["tbr"]["complete"] is False, "generated TBR defaults must block certification until owners fill refs/policies"
+        assert report["summary"]["tbr_blockers"] > 0
         assert report["ladder"]["R3_supervised_send"]["pass"] is False, "R3+ must stay a human gate"
         assert report["summary"]["golden_graded"] == 3
 
@@ -225,18 +232,315 @@ def test_run_card_contract() -> None:
                                   input_ref="in", output_ref="out", source_refs=["s1"])
         errs = runcard.validate_run_card(rc)
         assert any("confidence" in e for e in errs), "C run card must demand confidence/model/prompt"
-        rc.update({"confidence": 0.91, "model": "m", "prompt_version": "1.0.0"})
-        assert runcard.validate_run_card(rc) == []
-        runcard.write_run_card(pkg, rc)
-        assert (pkg / "process" / "run-cards" / "t-judge" / "r1.json").exists()
-        rc2 = dict(rc, run_id="r2", refuse={"refused": True, "hard": True, "reason": "identity unclear"})
+        rc.update({"confidence": 0.91, "requested_model": "m", "actual_model": "m",
+                   "model_verified": True, "verification_source": "test",
+                   "executor": "test", "adapter_version": "test", "prompt_version": "1.0.0"})
+        tbr_missing_errors = runcard.validate_run_card(rc)
+        assert any("TBR run proof requires" in e for e in tbr_missing_errors)
+        assert rc["tbr_required"] is True
+        assert rc["certification_eligible"] is False
+        assert "tbr_definition_refs_missing" in rc["certification_blockers"]
+        rc_explicit_no_tbr = runcard.new_run_card(run_id="r1no", workflow="t", node_id="t-judge", runtime_mode="C",
+                                                   ts_start="2026-06-09T00:00:00Z", ts_end="2026-06-09T00:00:01Z",
+                                                   input_ref="in", output_ref="out", source_refs=["s1"], confidence=0.91,
+                                                   requested_model="m", actual_model="m", model_verified=True,
+                                                   verification_source="test", executor="test", adapter_version="test",
+                                                   prompt_version="1.0.0", tbr_required=False)
+        assert runcard.validate_run_card(rc_explicit_no_tbr) == []
+        assert rc_explicit_no_tbr["certification_eligible"] is False
+        assert "tbr_not_required_non_certifying" in rc_explicit_no_tbr["certification_blockers"]
+        rc_bad_tbr = dict(rc, tbr_required=True, tbr={})
+        assert any("TBR" in e for e in runcard.validate_run_card(rc_bad_tbr)), "required TBR proof must be physical"
+        rc_tbr = runcard.new_run_card(run_id="r1t", workflow="t", node_id="t-judge", runtime_mode="C",
+                                      ts_start="2026-06-09T00:00:00Z", ts_end="2026-06-09T00:00:01Z",
+                                      input_ref="in", output_ref="out", source_refs=["s1"],
+                                      confidence=0.91, requested_model="m", actual_model="m",
+                                      model_verified=True, verification_source="test", executor="test",
+                                      adapter_version="test", prompt_version="1.0.0", tbr_required=True,
+                                      tbr={"definition_refs": ["def:active-customer"],
+                                           "semantic_source_refs": ["warehouse.metric_view"],
+                                           "prompt_ref": "process/prompts/t-judge.md",
+                                           "prompt_version": "1.0.0",
+                                           "response_ref": "out",
+                                           "tool_call_refs": ["audit:zero_tool_calls_executed"],
+                                           "user_ref": "user:test",
+                                           "recipient_ref": "recipient:test",
+                                           "retention_class": "six_months",
+                                           "tamper_evidence": "append_only_log",
+                                           "trace_fields": list(runcard.TBR_TRACE_FIELDS),
+                                           "permission_decision": {"allowed": True, "policy_ref": "policy:user-via-agent", "reason": "test"}})
+        assert runcard.validate_run_card(rc_tbr) == []
+        rc_todo_tbr: dict = dict(rc_tbr, run_id="r1todo", certification_eligible=True, certification_blockers=[])
+        rc_todo_tbr["tbr"] = {
+            "definition_refs": ["TODO: semantic definition"],
+            "semantic_source_refs": ["warehouse.metric_view"],
+            "prompt_ref": "process/prompts/t-judge.md",
+            "prompt_version": "1.0.0",
+            "response_ref": "out",
+            "tool_call_refs": ["audit:zero_tool_calls_executed"],
+            "user_ref": "user:test",
+            "recipient_ref": "recipient:test",
+            "retention_class": "six_months",
+            "tamper_evidence": "append_only_log",
+            "permission_decision": {"allowed": True, "policy_ref": "policy:user-via-agent", "reason": "test"},
+            "trace_fields": list(runcard.TBR_TRACE_FIELDS),
+        }
+        assert runcard.validate_run_card(rc_todo_tbr) == []
+        assert rc_todo_tbr["certification_eligible"] is False
+        assert "tbr_contains_todo" in rc_todo_tbr["certification_blockers"]
+        rc_placeholder_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_placeholder_tbr["tbr"]["definition_refs"] = ["placeholder"]
+        rc_placeholder_tbr["tbr"]["permission_decision"]["policy_ref"] = "policy:any request"
+        assert runcard.validate_run_card(rc_placeholder_tbr) == []
+        assert rc_placeholder_tbr["certification_eligible"] is False
+        assert "tbr_contains_placeholder" in rc_placeholder_tbr["certification_blockers"]
+        assert "tbr_permission_scope_unbounded" in rc_placeholder_tbr["certification_blockers"]
+        rc_none_selected_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_none_selected_tbr["tbr"]["definition_refs"] = ["none selected"]
+        rc_none_selected_tbr["tbr"]["semantic_source_refs"] = ["none selected"]
+        rc_none_selected_tbr["tbr"]["permission_decision"]["policy_ref"] = "none selected"
+        rc_none_selected_tbr["tbr"]["tamper_evidence"] = "none selected"
+        assert runcard.validate_run_card(rc_none_selected_tbr) == []
+        assert rc_none_selected_tbr["certification_eligible"] is False
+        assert "tbr_contains_placeholder" in rc_none_selected_tbr["certification_blockers"]
+        no_proof_cases = {
+            "definition_refs": ["no_definition"],
+            "semantic_source_refs": ["no_source"],
+            "prompt_ref": "none:no_ref",
+            "prompt_version": "no_prompt_version",
+            "response_ref": "no_response",
+            "tool_call_refs": ["not_applicable:no_tool"],
+            "user_ref": "no_user",
+            "recipient_ref": "no_recipient",
+            "retention_class": "no_retention",
+            "tamper_evidence": "no_tamper",
+        }
+        for field, bad_value in no_proof_cases.items():
+            rc_no_proof_tbr: dict = json.loads(json.dumps(rc_tbr))
+            rc_no_proof_tbr["tbr"][field] = bad_value
+            assert runcard.validate_run_card(rc_no_proof_tbr) == []
+            assert rc_no_proof_tbr["certification_eligible"] is False
+            assert "tbr_contains_no_proof_sentinel" in rc_no_proof_tbr["certification_blockers"]
+        rc_no_policy_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_no_policy_tbr["tbr"]["permission_decision"]["policy_ref"] = "no_policy"
+        assert runcard.validate_run_card(rc_no_policy_tbr) == []
+        assert rc_no_policy_tbr["certification_eligible"] is False
+        assert "tbr_contains_no_proof_sentinel" in rc_no_policy_tbr["certification_blockers"]
+        audit_no_proof_cases = {
+            "definition_refs": ["audit:no_definition"],
+            "semantic_source_refs": ["audit:no_source"],
+            "user_ref": "audit:no_user",
+        }
+        for field, bad_value in audit_no_proof_cases.items():
+            rc_audit_no_proof_tbr: dict = json.loads(json.dumps(rc_tbr))
+            rc_audit_no_proof_tbr["tbr"][field] = bad_value
+            assert runcard.validate_run_card(rc_audit_no_proof_tbr) == []
+            assert rc_audit_no_proof_tbr["certification_eligible"] is False
+            assert "tbr_contains_no_proof_sentinel" in rc_audit_no_proof_tbr["certification_blockers"]
+        rc_audit_no_policy_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_audit_no_policy_tbr["tbr"]["permission_decision"]["policy_ref"] = "audit:no_policy"
+        assert runcard.validate_run_card(rc_audit_no_policy_tbr) == []
+        assert rc_audit_no_policy_tbr["certification_eligible"] is False
+        assert "tbr_contains_no_proof_sentinel" in rc_audit_no_policy_tbr["certification_blockers"]
+        rc_shared_service_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_shared_service_tbr["tbr"]["permission_decision"]["policy_ref"] = "policy:shared-service-account"
+        assert runcard.validate_run_card(rc_shared_service_tbr) == []
+        assert rc_shared_service_tbr["certification_eligible"] is False
+        assert "tbr_permission_scope_unbounded" in rc_shared_service_tbr["certification_blockers"]
+        rc_non_grant_words_tbr: dict = json.loads(json.dumps(rc_tbr))
+        rc_non_grant_words_tbr["tbr"]["definition_refs"] = ["all salary records definition"]
+        rc_non_grant_words_tbr["tbr"]["retention_class"] = "review every 30 days"
+        assert runcard.validate_run_card(rc_non_grant_words_tbr) == []
+        assert rc_non_grant_words_tbr["certification_eligible"] is True
+        assert "tbr_permission_scope_unbounded" not in rc_non_grant_words_tbr["certification_blockers"]
+        rc_string_allowed: dict = json.loads(json.dumps(rc_tbr))
+        rc_string_allowed["tbr"]["permission_decision"]["allowed"] = "true"
+        string_allowed_errors = runcard.validate_run_card(rc_string_allowed)
+        assert any("allowed must be true/false" in e for e in string_allowed_errors)
+        assert rc["usage"]["tokens_in"] == "unknown" and rc["cost"]["tokens_in"] == "unknown"
+        runcard.write_run_card(pkg, rc_tbr)
+        assert (pkg / "process" / "run-cards" / "t-judge" / "r1t.json").exists()
+        rc2 = dict(rc_tbr, run_id="r2", refuse={"refused": True, "hard": True, "reason": "identity unclear"})
         runcard.write_run_card(pkg, rc2)
         assert list((pkg / "process" / "run-cards" / "_review_queue").glob("*.json")), \
             "refusals must land in the human-over-the-loop review queue"
     print("[OK] run-card contract test passed")
 
 
+def test_tbr_gate_fail_closed_contract() -> None:
+    sys.path.insert(0, str(REPO / "scripts"))
+    import tbr_gate  # type: ignore[reportMissingImports]
+
+    workflow_missing_cadence = {
+        "max_lane": "draft",
+        "tbr_gate": {
+            "required": True,
+            "translator": {
+                "canonical_definitions": [{"term": "active_customer", "definition_ref": "defs/active", "source_of_truth_ref": "semantic/active"}],
+                "source_of_truth_refs": ["semantic/active"],
+                "raw_query_policy": "semantic_gate_required",
+            },
+            "bouncer": {
+                "effective_permission_model": "user_via_agent",
+                "sensitive_systems": ["crm:customer_sensitive_fields"],
+                "policy_engine_ref": "policy/runtime",
+                "task_scoped_tokens_required": True,
+            },
+            "recorder": {
+                "run_card_required": True,
+                "trace_fields": list(tbr_gate.TBR_TRACE_FIELDS),
+                "retention_class": "six_months",
+                "tamper_evidence": "append_only_log",
+            },
+        },
+    }
+    assert any("review_cadence" in e for e in tbr_gate.validate_workflow_tbr(workflow_missing_cadence))
+    workflow_missing_sensitive = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_missing_sensitive["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    workflow_missing_sensitive["tbr_gate"]["bouncer"].pop("sensitive_systems")
+    assert any("sensitive_systems" in e for e in tbr_gate.validate_workflow_tbr(workflow_missing_sensitive))
+    workflow_bad_canonical_definition = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_bad_canonical_definition["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    workflow_bad_canonical_definition["tbr_gate"]["translator"]["canonical_definitions"] = [{"term": "active_customer"}]
+    bad_definition_errors = tbr_gate.validate_workflow_tbr(workflow_bad_canonical_definition)
+    assert any("canonical_definitions[0].definition_ref" in e for e in bad_definition_errors)
+    assert any("canonical_definitions[0].source_of_truth_ref" in e for e in bad_definition_errors)
+    workflow_no_policy = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_no_policy["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    workflow_no_policy["tbr_gate"]["bouncer"]["policy_engine_ref"] = "no_policy"
+    assert any("policy_engine_ref" in e for e in tbr_gate.validate_workflow_tbr(workflow_no_policy))
+    workflow_none_selected = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_none_selected["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    workflow_none_selected["tbr_gate"]["translator"]["source_of_truth_refs"] = ["none selected"]
+    workflow_none_selected["tbr_gate"]["bouncer"]["policy_engine_ref"] = "none selected"
+    workflow_none_selected["tbr_gate"]["recorder"]["tamper_evidence"] = "none selected"
+    none_selected_errors = tbr_gate.validate_workflow_tbr(workflow_none_selected)
+    assert any("source_of_truth_refs" in e for e in none_selected_errors)
+    assert any("policy_engine_ref" in e for e in none_selected_errors)
+    assert any("tamper_evidence" in e for e in none_selected_errors)
+    workflow_audit_no_policy = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_audit_no_policy["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    workflow_audit_no_policy["tbr_gate"]["bouncer"]["policy_engine_ref"] = "audit:no_policy"
+    assert any("policy_engine_ref" in e for e in tbr_gate.validate_workflow_tbr(workflow_audit_no_policy))
+    workflow_bare_no_proof = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_bare_no_proof["tbr_gate"]["recorder"]["review_cadence"] = "no_review"
+    workflow_bare_no_proof["tbr_gate"]["recorder"]["retention_class"] = "no_retention"
+    workflow_bare_no_proof["tbr_gate"]["recorder"]["tamper_evidence"] = "no_tamper"
+    workflow_bare_no_proof["tbr_gate"]["bouncer"]["sensitive_systems"] = ["no_sensitive_map"]
+    bare_no_errors = tbr_gate.validate_workflow_tbr(workflow_bare_no_proof)
+    assert any("sensitive_systems" in e for e in bare_no_errors)
+    assert any("review_cadence" in e for e in bare_no_errors)
+    assert any("retention_class" in e for e in bare_no_errors)
+    assert any("tamper_evidence" in e for e in bare_no_errors)
+    workflow_review_every = json.loads(json.dumps(workflow_missing_cadence))
+    workflow_review_every["tbr_gate"]["recorder"]["review_cadence"] = "review every 30 days"
+    assert tbr_gate.validate_workflow_tbr(workflow_review_every) == []
+
+    workflow_required_false = {"max_lane": "draft", "tbr_gate": {"required": False}}
+    node_required_false = {"node_id": "n", "runtime_mode": "C", "tbr_gate": {"required": False}}
+    assert tbr_gate.tbr_required_for_workflow(workflow_required_false) is True
+    assert tbr_gate.tbr_required_for_node(workflow_required_false, node_required_false) is True
+    workflow_exempt = {"max_lane": "internal_artifact_only", "tbr_gate": {
+        "required": False, "non_certifying": True, "exemption_reason": "offline fixture package"}}
+    assert tbr_gate.tbr_required_for_workflow(workflow_exempt) is False
+    for placeholder_reason in ("todo later", "n/a", "none", "none selected"):
+        workflow_bad_exempt = {"max_lane": "internal_artifact_only", "tbr_gate": {
+            "required": False, "non_certifying": True, "exemption_reason": placeholder_reason}}
+        assert tbr_gate.tbr_required_for_workflow(workflow_bad_exempt) is True
+
+    node_missing_forbidden = {
+        "node_id": "n",
+        "runtime_mode": "C",
+        "tbr_gate": {
+            "required": True,
+            "translator": {"definition_refs": ["defs/active"], "source_of_truth_refs": ["semantic/active"],
+                           "source_refs_required": True, "raw_query_allowed": False},
+            "bouncer": {
+                "agent_identity": "agent:n",
+                "human_identity_passthrough": "required",
+                "allowed_resources": ["deal:read"],
+                "effective_permission_path": "user->agent->policy->deal",
+                "task_scope": "read deal for current run",
+            },
+            "recorder": {
+                "run_card_required": True,
+                "trace_fields": list(tbr_gate.TBR_TRACE_FIELDS),
+                "permission_decision_logged": True,
+                "definition_refs_logged": True,
+                "source_refs_logged": True,
+                "retention_class": "six_months",
+                "tamper_evidence": "append_only_log",
+            },
+        },
+    }
+    assert any("forbidden_resources" in e for e in tbr_gate.validate_node_tbr(workflow_missing_cadence, node_missing_forbidden))
+    node_valid_tbr = json.loads(json.dumps(node_missing_forbidden))
+    node_valid_tbr["tbr_gate"]["bouncer"]["forbidden_resources"] = ["hr:salary"]
+    assert tbr_gate.validate_node_tbr(workflow_missing_cadence, node_valid_tbr) == []
+    node_no_policy = json.loads(json.dumps(node_valid_tbr))
+    node_no_policy["tbr_gate"]["bouncer"]["effective_permission_path"] = "no_policy"
+    assert any("effective_permission_path" in e for e in tbr_gate.validate_node_tbr(workflow_missing_cadence, node_no_policy))
+    node_none_selected = json.loads(json.dumps(node_valid_tbr))
+    node_none_selected["tbr_gate"]["translator"]["definition_refs"] = ["none selected"]
+    node_none_selected["tbr_gate"]["translator"]["source_of_truth_refs"] = ["none selected"]
+    node_none_selected["tbr_gate"]["bouncer"]["effective_permission_path"] = "none selected"
+    node_none_selected["tbr_gate"]["recorder"]["tamper_evidence"] = "none selected"
+    none_selected_node_errors = tbr_gate.validate_node_tbr(workflow_missing_cadence, node_none_selected)
+    assert any("definition_refs" in e for e in none_selected_node_errors)
+    assert any("source_of_truth_refs" in e for e in none_selected_node_errors)
+    assert any("effective_permission_path" in e for e in none_selected_node_errors)
+    assert any("tamper_evidence" in e for e in none_selected_node_errors)
+    node_audit_no_policy = json.loads(json.dumps(node_valid_tbr))
+    node_audit_no_policy["tbr_gate"]["bouncer"]["effective_permission_path"] = "audit:no_policy"
+    node_audit_no_policy["tbr_gate"]["translator"]["definition_refs"] = ["audit:no_definition"]
+    node_audit_no_policy["tbr_gate"]["translator"]["source_of_truth_refs"] = ["audit:no_source"]
+    audit_no_node_errors = tbr_gate.validate_node_tbr(workflow_missing_cadence, node_audit_no_policy)
+    assert any("effective_permission_path" in e for e in audit_no_node_errors)
+    assert any("definition_refs" in e for e in audit_no_node_errors)
+    assert any("source_of_truth_refs" in e for e in audit_no_node_errors)
+    node_forbid_all_salary = json.loads(json.dumps(node_valid_tbr))
+    node_forbid_all_salary["tbr_gate"]["bouncer"]["forbidden_resources"] = ["all salary records"]
+    assert tbr_gate.validate_node_tbr(workflow_missing_cadence, node_forbid_all_salary) == []
+
+    bad_semantic_workflow = json.loads(json.dumps(workflow_missing_cadence))
+    bad_semantic_workflow["tbr_gate"]["recorder"]["review_cadence"] = "monthly audit"
+    bad_semantic_workflow["tbr_gate"]["bouncer"]["effective_permission_model"] = "shared_service_account"
+    bad_semantic_workflow["tbr_gate"]["bouncer"]["task_scoped_tokens_required"] = False
+    bad_semantic_workflow["tbr_gate"]["translator"]["raw_query_policy"] = "raw SQL allowed with semantic gate"
+    bad_semantic_workflow["tbr_gate"]["translator"]["source_of_truth_refs"] = ["placeholder"]
+    bad_semantic_workflow["tbr_gate"]["bouncer"]["sensitive_systems"] = ["none:no_sensitive_map"]
+    bad_workflow_errors = tbr_gate.validate_workflow_tbr(bad_semantic_workflow)
+    assert any("effective_permission_model" in e for e in bad_workflow_errors)
+    assert any("task_scoped_tokens_required" in e for e in bad_workflow_errors)
+    assert any("raw_query_policy" in e for e in bad_workflow_errors)
+    assert any("source_of_truth_refs" in e and "concrete" in e for e in bad_workflow_errors)
+    assert any("sensitive_systems" in e and "concrete" in e for e in bad_workflow_errors)
+
+    node_bad_semantics = json.loads(json.dumps(node_missing_forbidden))
+    node_bad_semantics["tbr_gate"]["bouncer"]["forbidden_resources"] = ["hr:salary"]
+    node_bad_semantics["tbr_gate"]["bouncer"]["allowed_resources"] = ["crm:*"]
+    node_bad_semantics["tbr_gate"]["bouncer"]["task_scope"] = "any request forever"
+    node_bad_semantics["tbr_gate"]["bouncer"]["human_identity_passthrough"] = "not_required"
+    node_bad_semantics["tbr_gate"]["translator"]["raw_query_allowed"] = True
+    node_bad_semantics["tbr_gate"]["recorder"]["permission_decision_logged"] = False
+    node_bad_semantics["tbr_gate"]["recorder"]["trace_fields"] = ["run_id"]
+    bad_node_errors = tbr_gate.validate_node_tbr(workflow_missing_cadence, node_bad_semantics)
+    assert any("human_identity_passthrough" in e for e in bad_node_errors)
+    assert any("raw_query_allowed" in e for e in bad_node_errors)
+    assert any("permission_decision_logged" in e for e in bad_node_errors)
+    assert any("allowed_resources" in e for e in bad_node_errors)
+    assert any("task_scope" in e for e in bad_node_errors)
+    assert any("recorder.trace_fields" in e for e in bad_node_errors)
+    node_shared_service = json.loads(json.dumps(node_missing_forbidden))
+    node_shared_service["tbr_gate"]["bouncer"]["forbidden_resources"] = ["hr:salary"]
+    node_shared_service["tbr_gate"]["bouncer"]["agent_identity"] = "shared-service-account"
+    shared_service_errors = tbr_gate.validate_node_tbr(workflow_missing_cadence, node_shared_service)
+    assert any("agent_identity" in e and "unbounded" in e for e in shared_service_errors)
+    print("[OK] TBR gate fail-closed contract test passed")
+
+
 if __name__ == "__main__":
     test_pipeline()
     test_runtime_suggester()
     test_run_card_contract()
+    test_tbr_gate_fail_closed_contract()

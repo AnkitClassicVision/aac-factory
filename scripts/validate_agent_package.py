@@ -22,6 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tbr_gate import validate_node_tbr, validate_workflow_tbr
+
 WORKFLOW_REQUIRED = [
     "card_type", "aac_card_version", "workflow_id", "workflow_box", "control_topology",
     "value_mode", "cost_framing", "trigger", "finished_state", "sinks", "owners",
@@ -53,6 +55,7 @@ def main() -> None:
     blockers: list[str] = []
     warnings: list[str] = []
     human_gates: list[str] = []
+    tbr_blockers: list[str] = []
 
     # ---------- ATLAS ----------
     atlas_path = pkg / "atlas" / "atlas.json"
@@ -140,6 +143,12 @@ def main() -> None:
         if len(named) == 1 and len(owners) >= 3:
             warnings.append("owner concentration: one human holds all owner roles — name a second reviewer before R3")
 
+        for b in validate_workflow_tbr(wf):
+            tbr_blockers.append(b)
+            blockers.append(b)
+            if "TODO" in b:
+                todo_count += 1
+
         node_ids = [n["node_id"] if isinstance(n, dict) else n for n in wf.get("nodes", [])]
         edges = wf.get("edges") or []
         if not edges:
@@ -184,6 +193,11 @@ def main() -> None:
                 elif has_todo(nc.get(f)):
                     todo_count += 1
                     blockers.append(f"{nid}: {f} still TODO")
+            for b in validate_node_tbr(wf, nc):
+                tbr_blockers.append(b)
+                blockers.append(b)
+                if "TODO" in b:
+                    todo_count += 1
             rm = nc.get("runtime_mode")
             if rm not in {"D", "C", "A", "H"}:
                 if "TODO" in str(rm):
@@ -280,7 +294,9 @@ def main() -> None:
             "blockers": len(blockers), "warnings": len(warnings), "human_gates": len(human_gates),
             "todo_fields": todo_count, "assumed_provenance_fields": assumed_fields,
             "golden_graded": graded, "golden_pending": pending,
+            "tbr_blockers": len(tbr_blockers),
         },
+        "tbr": {"blockers": tbr_blockers, "complete": not tbr_blockers},
         "ladder": ladder,
         "blockers": blockers,
         "warnings": warnings,
@@ -296,7 +312,7 @@ def main() -> None:
         mark = "PASS" if info.get("pass") else "BLOCKED"
         print(f"  {ring}: {mark}" + (f" | human gate: {info['human_gate']}" if info.get("human_gate") else ""))
     print(f"  blockers={len(blockers)} warnings={len(warnings)} todo={todo_count} "
-          f"golden graded/pending={graded}/{pending}")
+          f"golden graded/pending={graded}/{pending} tbr_blockers={len(tbr_blockers)}")
     if blockers:
         print("\nTop blockers:")
         for b in blockers[:12]:

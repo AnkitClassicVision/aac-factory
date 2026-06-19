@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 from concept_to_process import AUTOMATION_POLICY_DEFAULT, execution_block, objective_block, supervision_block
+from tbr_gate import TBR_TRACE_FIELDS, default_node_tbr_gate, default_workflow_tbr_gate
 
 PROPOSED_ACTIONS = {
     "spine_locked": "Human: lock the spine in atlas/atlas.json (one falsifiable claim, 3-9 trunk nodes).",
@@ -37,6 +38,9 @@ PROPOSED_ACTIONS = {
     "graph_has_refusal_paths": "Add refuse_sink / hard_refuse_sink edges: refusal is first-class, never optional.",
     "cards_exist_per_node": "Re-run scripts/concept_to_process.py to generate missing node cards.",
     "card_items_complete": "Fill TODO card fields from grill answers or measured probes (see readiness_report blockers).",
+    "tbr_gate_present": "Re-run concept_to_process.py or let self-heal inject TBR defaults, then fill definitions/policies from owners.",
+    "tbr_recorder_trace_contract": "Restore the Recorder trace-field contract; run cards must prove definitions, source refs, permission decisions, gates, refusals, and actions.",
+    "tbr_gate_resolved": "Human/source-owner queue: fill semantic definitions, source-of-truth refs, permission path, and recorder retention/tamper evidence.",
     "h_nodes_justified": "Human decision: justify each inline human gate as highest-risk, or demote to human_over_loop.",
     "golden_set_policy": "Human-over-loop queue: harvest/grade golden examples (grade, never author).",
     "no_leaked_identifiers": "BLOCKING: redact the matched strings, then re-run QA. Never auto-edited.",
@@ -54,6 +58,14 @@ def save(p: Path, data) -> None:
     p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _complete_trace_fields(existing) -> list[str]:
+    fields = list(existing or [])
+    for field in TBR_TRACE_FIELDS:
+        if field not in fields:
+            fields.append(field)
+    return fields
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         raise SystemExit("Usage: python scripts/heal_agent_package.py <package_dir>")
@@ -63,7 +75,7 @@ def main() -> None:
         raise SystemExit("No exports/qa_report.json — run qa_agent_package.py first.")
 
     wf_path = pkg / "process" / "workflow.aac.json"
-    wf = load(wf_path, {})
+    wf = load(wf_path, {}) or {}
     policy = (wf.get("automation_policy") or AUTOMATION_POLICY_DEFAULT)["self_healing"]
     if not policy.get("enabled", True):
         print("Self-healing disabled by automation_policy — proposals only.")
@@ -106,10 +118,39 @@ def main() -> None:
                         changed_wf = True
                     if changed_wf:
                         save(wf_path, wf)
+                if s["id"] in {"tbr_gate_present", "tbr_recorder_trace_contract"}:
+                    changed_wf = False
+                    if not wf.get("tbr_gate"):
+                        wf["tbr_gate"] = default_workflow_tbr_gate(wf)
+                        changed_wf = True
+                    else:
+                        rec = wf.setdefault("tbr_gate", {}).setdefault("recorder", {})
+                        complete_fields = _complete_trace_fields(rec.get("trace_fields"))
+                        if complete_fields != list(rec.get("trace_fields") or []):
+                            rec["trace_fields"] = complete_fields
+                            changed_wf = True
+                    if changed_wf:
+                        save(wf_path, wf)
+                        applied.append(f"{s['id']}: healed workflow tbr_gate")
+                    for nid_card in sorted((pkg / "process" / "nodes").glob("*.aac.json")):
+                        card = load(nid_card, {}) or {}
+                        changed = False
+                        if not card.get("tbr_gate"):
+                            card["tbr_gate"] = default_node_tbr_gate(wf, card)
+                            changed = True
+                        else:
+                            rec = card.setdefault("tbr_gate", {}).setdefault("recorder", {})
+                            complete_fields = _complete_trace_fields(rec.get("trace_fields"))
+                            if complete_fields != list(rec.get("trace_fields") or []):
+                                rec["trace_fields"] = complete_fields
+                                changed = True
+                        if changed:
+                            save(nid_card, card)
+                            applied.append(f"{s['id']}: healed {nid_card.name}")
                 if s["id"] == "objective_present":
                     gref = wf.get("golden_set_ref", f"process/evals/{pkg.name}.golden.json")
                     for nid_card in sorted((pkg / "process" / "nodes").glob("*.aac.json")):
-                        card = load(nid_card, {})
+                        card = load(nid_card, {}) or {}
                         obj = card.get("objective") or {}
                         if card.get("runtime_mode") in {"C", "A"} and not (
                                 (obj.get("primary") or {}).get("metric") and obj.get("improvement_policy")):
@@ -120,7 +161,7 @@ def main() -> None:
                 if s["id"] in {"telemetry_per_node", "supervision_over_loop", "execution_declared"}:
                     metrics_default = (wf.get("observability", {}) or {}).get("metrics") or ["runs", "refusals"]
                     for nid_card in sorted((pkg / "process" / "nodes").glob("*.aac.json")):
-                        card = load(nid_card, {})
+                        card = load(nid_card, {}) or {}
                         changed = False
                         t = card.get("telemetry") or {}
                         if not (t.get("run_card_required") and t.get("metrics") and t.get("artifact_path")):

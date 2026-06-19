@@ -52,12 +52,13 @@ def test_improvement_loop() -> None:
         assert judge["objective"]["primary"]["metric"] == "golden_accuracy"
         assert judge["objective"]["improvement_policy"]["auto_adopt"] == "cheaper_or_better_with_holdout_pass"
 
-        # improver: champion model is TODO; cheapest equal-scoring challenger must be adopted
+        # improver: replay/stub executors may propose but must not auto-adopt in v0.3
         out = run([PY, "scripts/improve_node.py", str(pkg), "t-judge"], work)
-        assert "adopted_and_re_entering_gates" in out.stdout, out.stdout
+        assert "proposal_queued_adoption_blocked_stub_executor" in out.stdout, out.stdout
         judge = json.loads(judge_path.read_text(encoding="utf-8"))
-        assert judge["model"] == "claude-haiku-4-5-20251001", "cheapest model with equal score must win"
+        assert judge["model"].startswith("TODO"), "stub evidence must not mutate the certified card model"
         assert (pkg / "exports" / "improvement_ledger.jsonl").exists()
+        assert "adoption_blocked_stub_executor" in (pkg / "exports" / "improvement_ledger.jsonl").read_text(encoding="utf-8")
         assert (pkg / ".holdout" / "evals" / "t-judge.holdout.json").exists(), "holdout must be sealed"
 
         decision = json.loads((pkg / "exports" / "improvement_proposals" / "t-judge.json")
@@ -70,9 +71,9 @@ def test_improvement_loop() -> None:
         open_refs = {p["record_ref"] for p in open_eval["per_example"]}
         assert not (sealed & open_refs), "open split must exclude sealed holdout examples"
 
-        # second run: champion is now the cheapest model -> champion stands (idempotent)
+        # second run: still proposal-only/idempotent under stub evidence
         out2 = run([PY, "scripts/improve_node.py", str(pkg), "t-judge"], work)
-        assert "champion_stands" in out2.stdout or "proposal_queued" in out2.stdout
+        assert "proposal_queued_adoption_blocked_stub_executor" in out2.stdout or "champion_stands" in out2.stdout
 
         # refusals: D node and H node are not improvable
         r = subprocess.run([PY, "scripts/improve_node.py", str(pkg), "t-intake"],
@@ -88,6 +89,25 @@ def test_improvement_loop() -> None:
         run([PY, "scripts/heal_agent_package.py", str(pkg)], work)
         judge = json.loads(judge_path.read_text(encoding="utf-8"))
         assert judge["objective"]["primary"]["metric"] == "golden_accuracy", "heal must re-inject objective"
+
+        # QA flags partial Recorder trace contracts; heal completes missing fields rather than only empty lists
+        wf_path = pkg / "process" / "workflow.aac.json"
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        workflow_trace_fields = list(wf["tbr_gate"]["recorder"]["trace_fields"])
+        wf["tbr_gate"]["recorder"]["trace_fields"] = workflow_trace_fields[:3]
+        wf_path.write_text(json.dumps(wf, indent=2), encoding="utf-8")
+        judge = json.loads(judge_path.read_text(encoding="utf-8"))
+        node_trace_fields = list(judge["tbr_gate"]["recorder"]["trace_fields"])
+        judge["tbr_gate"]["recorder"]["trace_fields"] = node_trace_fields[:3]
+        judge_path.write_text(json.dumps(judge, indent=2), encoding="utf-8")
+        r = subprocess.run([PY, "scripts/qa_agent_package.py", str(pkg)], cwd=work,
+                           capture_output=True, text=True)
+        assert "tbr_recorder_trace_contract" in r.stdout
+        run([PY, "scripts/heal_agent_package.py", str(pkg)], work)
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        judge = json.loads(judge_path.read_text(encoding="utf-8"))
+        assert wf["tbr_gate"]["recorder"]["trace_fields"] == workflow_trace_fields
+        assert judge["tbr_gate"]["recorder"]["trace_fields"] == node_trace_fields
 
     print("[OK] improvement loop test passed")
 

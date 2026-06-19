@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 from factory_config import load_config
+from tbr_gate import default_node_tbr_gate, default_workflow_tbr_gate
 
 CFG = load_config()
 
@@ -31,6 +32,7 @@ WORKFLOW_REQUIRED = [
     "card_type", "aac_card_version", "workflow_id", "workflow_box", "control_topology",
     "value_mode", "cost_framing", "trigger", "finished_state", "sinks", "owners",
     "max_lane", "nodes", "agents", "hard_refuse", "observability", "residue", "escalation_path",
+    "tbr_gate",
 ]
 SINK_IDS = {"happy_sink", "refuse_sink", "hard_refuse_sink"}
 
@@ -228,6 +230,7 @@ def build_workflow_card(slug: str, atlas: dict, source: dict | None) -> tuple[di
     preferred_target = CFG.get("deploy_preferences", {}).get("runtime_target")
     card.setdefault("runtime_target", preferred_target or
                     "TODO: compile target — vps-scheduler | lambda | hermes-cron (owner picks at S6)")
+    card.setdefault("tbr_gate", default_workflow_tbr_gate(card))
 
     # nodes: from source packet, else from ATLAS spine
     nodes = normalize_nodes(card.get("nodes"))
@@ -387,6 +390,7 @@ def main() -> None:
             "execution": execution_block(runtime),
             "provenance_note": "generator stubs are provenance=assumed until confirmed/measured",
         }
+        node_card["tbr_gate"] = n.get("tbr_gate") or default_node_tbr_gate(card, node_card)
         if rt_suggestion:
             node_card["runtime_suggestion"] = rt_suggestion
             flags.append(f"{node_id}: runtime_mode TODO — suggested {rt_suggestion['mode']} "
@@ -412,6 +416,9 @@ def main() -> None:
                     f"Spine: {atlas.get('spine', '')}\n\n"
                     "## Bounded action set\nTODO: finite vocabulary the model may choose from.\n\n"
                     "## Grounding\nTODO: sources the output must cite (source ids required).\n\n"
+                    "## Translator / Bouncer / Recorder\n"
+                    "TODO: cite semantic definition refs, respect user-via-agent permissions, "
+                    "and ensure run-card proof captures source/definition/permission refs.\n\n"
                     "## Output contract\nTODO: schema (must match the node card output_contract).\n\n"
                     "## Refuse\nIf input is out-of-distribution, ambiguous, or violates hard-refuse classes: refuse with reason.\n",
                     encoding="utf-8",
